@@ -19,6 +19,7 @@
 ## 文档
 
 - `docs/导入统计与分润计算逻辑.md`：导入规则、统计口径、分润与留存计算说明
+- `docs/Docker与GitHubActions部署.md`：Docker 构建、镜像发布与服务器部署说明
 
 ## 环境要求
 
@@ -69,3 +70,26 @@ pnpm build
 pnpm --filter @total-gmn/api dev
 pnpm --filter @total-gmn/web dev
 ```
+
+## Docker 部署
+
+本项目使用双镜像部署（API + Web）：
+
+```bash
+# API
+docker build -f apps/api/Dockerfile -t total-gmn-api:test .
+
+# Web
+docker build -f apps/web/Dockerfile -t total-gmn-web:test --build-arg VITE_API_BASE=/api .
+```
+
+通过 compose 运行：
+
+```bash
+docker compose up -d
+# 如果你的环境没有 compose 子命令，可使用：
+# docker-compose up -d
+```
+
+- Web: `http://localhost:8080`
+- API: `http://localhost:3001`

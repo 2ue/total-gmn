@@ -1,7 +1,7 @@
 {
   "name": "total-gmn",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.0.1",
   "packageManager": "pnpm@9.15.9",
   "scripts": {
     "build": "pnpm -r build",
