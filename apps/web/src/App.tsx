@@ -203,6 +203,33 @@ interface TransactionChartsData {
     count: number;
     amount: number;
   }>;
+  pendingOverview: {
+    autoConfirmDays: number;
+    pendingCount: number;
+    pendingAmount: number;
+    dueSoon1Count: number;
+    dueSoon1Amount: number;
+    dueSoon3Count: number;
+    dueSoon3Amount: number;
+    dueSoon7Count: number;
+    dueSoon7Amount: number;
+    overdueCount: number;
+    overdueAmount: number;
+  };
+  pendingExpectedByDay: Array<{
+    day: string;
+    count: number;
+    amount: number;
+  }>;
+  pendingByBillAccount: Array<{
+    billAccount: string;
+    count: number;
+    amount: number;
+    dueSoon3Count: number;
+    dueSoon3Amount: number;
+    overdueCount: number;
+    overdueAmount: number;
+  }>;
   byAccountCategory: Array<{
     billAccount: string;
     category: string;
@@ -1011,6 +1038,21 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
       byDirection: body.byDirection ?? [],
       byStatusDirection: body.byStatusDirection ?? [],
       pendingAging: body.pendingAging ?? [],
+      pendingOverview: {
+        autoConfirmDays: body.pendingOverview?.autoConfirmDays ?? 10,
+        pendingCount: body.pendingOverview?.pendingCount ?? 0,
+        pendingAmount: body.pendingOverview?.pendingAmount ?? 0,
+        dueSoon1Count: body.pendingOverview?.dueSoon1Count ?? 0,
+        dueSoon1Amount: body.pendingOverview?.dueSoon1Amount ?? 0,
+        dueSoon3Count: body.pendingOverview?.dueSoon3Count ?? 0,
+        dueSoon3Amount: body.pendingOverview?.dueSoon3Amount ?? 0,
+        dueSoon7Count: body.pendingOverview?.dueSoon7Count ?? 0,
+        dueSoon7Amount: body.pendingOverview?.dueSoon7Amount ?? 0,
+        overdueCount: body.pendingOverview?.overdueCount ?? 0,
+        overdueAmount: body.pendingOverview?.overdueAmount ?? 0
+      },
+      pendingExpectedByDay: body.pendingExpectedByDay ?? [],
+      pendingByBillAccount: body.pendingByBillAccount ?? [],
       byAccountCategory: body.byAccountCategory ?? [],
       bySourceType: body.bySourceType ?? [],
       keyRatios: {
@@ -1824,6 +1866,8 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
   const chartDirectionSource = chartData?.byDirection ?? [];
   const chartStatusDirectionSource = chartData?.byStatusDirection ?? [];
   const chartPendingAgingSource = chartData?.pendingAging ?? [];
+  const chartPendingExpectedSource = chartData?.pendingExpectedByDay ?? [];
+  const chartPendingByAccountSource = (chartData?.pendingByBillAccount ?? []).slice(0, 20);
   const chartAccountCategorySource = (chartData?.byAccountCategory ?? []).slice(0, 20);
   const chartSourceTypeSource = chartData?.bySourceType ?? [];
   const chartClosedRefundDaySource = [...(chartData?.byClosedRefundDay ?? [])].sort((left, right) =>
@@ -2426,6 +2470,8 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
             <p>8. 来源类型：看导入来源结构（饼图）</p>
             <p>9. 关键比率：看抽成率/流量率/净利率（指标卡）</p>
             <p>10. 关闭/退款趋势、分润批次视角（趋势+台账）</p>
+            <p>11. 待到账雷达：待到账/即将到账/超期未到账（T+10）</p>
+            <p>12. 预计到账日与待到账账号分布（趋势+台账）</p>
           </div>
 
           <form
@@ -2500,6 +2546,22 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
               <MetricCard label="账号×分类组合数" value={String(chartData.byAccountCategory.length)} />
               <MetricCard label="来源类型数" value={String(chartData.bySourceType.length)} />
               <MetricCard label="分润批次数" value={String(chartData.settlementOverview.totalBatches)} />
+              <MetricCard
+                label={`待到账总额（T+${chartData.pendingOverview.autoConfirmDays}）`}
+                value={chartData.pendingOverview.pendingAmount.toFixed(2)}
+              />
+              <MetricCard
+                label="即将到账（1天内）"
+                value={`${chartData.pendingOverview.dueSoon1Amount.toFixed(2)}（${chartData.pendingOverview.dueSoon1Count}笔）`}
+              />
+              <MetricCard
+                label="即将到账（3天内）"
+                value={`${chartData.pendingOverview.dueSoon3Amount.toFixed(2)}（${chartData.pendingOverview.dueSoon3Count}笔）`}
+              />
+              <MetricCard
+                label="超期未到账（已超10天）"
+                value={`${chartData.pendingOverview.overdueAmount.toFixed(2)}（${chartData.pendingOverview.overdueCount}笔）`}
+              />
             </div>
           ) : null}
 
@@ -2659,6 +2721,58 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
                   value: item.amount
                 }))}
               />
+            </div>
+          ) : null}
+
+          {chartData ? (
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <SimpleBarChart
+                title={`预计到账趋势（T+${chartData.pendingOverview.autoConfirmDays}）`}
+                unit="元"
+                maxBodyHeightPx={320}
+                data={chartPendingExpectedSource.map((item) => ({
+                  label: `${item.day}（${item.count}笔）`,
+                  value: item.amount
+                }))}
+              />
+              <div className="rounded-xl border border-[var(--border)] bg-white p-4">
+                <h3 className="text-sm font-semibold">待到账账号分布（Top20）</h3>
+                <div className="mt-3 max-h-[360px] overflow-auto">
+                  <table className="min-w-full border-collapse text-xs">
+                    <thead className="bg-slate-100 text-left text-[var(--muted)]">
+                      <tr>
+                        <th className="px-2 py-1.5">账号</th>
+                        <th className="px-2 py-1.5">待到账笔数</th>
+                        <th className="px-2 py-1.5">待到账金额</th>
+                        <th className="px-2 py-1.5">3天内到账</th>
+                        <th className="px-2 py-1.5">超期未到账</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {chartPendingByAccountSource.map((item) => (
+                        <tr key={item.billAccount} className="border-t border-[var(--border)]">
+                          <td className="px-2 py-1.5">{formatBillAccountLabel(item.billAccount)}</td>
+                          <td className="px-2 py-1.5">{item.count}</td>
+                          <td className="px-2 py-1.5">{item.amount.toFixed(2)}</td>
+                          <td className="px-2 py-1.5">
+                            {item.dueSoon3Amount.toFixed(2)}（{item.dueSoon3Count}笔）
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {item.overdueAmount.toFixed(2)}（{item.overdueCount}笔）
+                          </td>
+                        </tr>
+                      ))}
+                      {chartPendingByAccountSource.length === 0 ? (
+                        <tr>
+                          <td className="px-2 py-4 text-center text-[var(--muted)]" colSpan={5}>
+                            暂无待到账数据
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
           ) : null}
 

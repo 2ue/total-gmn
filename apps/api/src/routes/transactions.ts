@@ -110,6 +110,8 @@ const MAIN_PENDING_STATUSES = new Set([
 ]);
 
 const MAIN_INCOME_CATEGORIES = new Set(["main_business", "manual_add"]);
+const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
+const AUTO_CONFIRM_DAYS = 10;
 
 const PENDING_AGING_BUCKETS = [
   { key: "0_1", label: "0-1天", min: 0, max: 1 },
@@ -132,6 +134,14 @@ function findPendingAgingBucket(days: number): (typeof PENDING_AGING_BUCKETS)[nu
     }
   }
   return PENDING_AGING_BUCKETS[PENDING_AGING_BUCKETS.length - 1]!;
+}
+
+function calcExpectedArrivalTime(transactionTime: Date): Date {
+  return new Date(transactionTime.getTime() + AUTO_CONFIRM_DAYS * MILLIS_PER_DAY);
+}
+
+function calcRemainingDays(expectedArrivalTime: Date, nowMs: number): number {
+  return Math.ceil((expectedArrivalTime.getTime() - nowMs) / MILLIS_PER_DAY);
 }
 
 function toPercent(numerator: number, denominator: number): number {
@@ -404,6 +414,20 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
       closedCount: number;
       refundCount: number;
     }>();
+    const pendingExpectedDayAgg = new Map<string, {
+      day: string;
+      count: number;
+      amount: number;
+    }>();
+    const pendingAccountAgg = new Map<string, {
+      billAccount: string;
+      count: number;
+      amount: number;
+      dueSoon3Count: number;
+      dueSoon3Amount: number;
+      overdueCount: number;
+      overdueAmount: number;
+    }>();
 
     let mainSettledIncome = 0;
     let mainPendingIncome = 0;
@@ -414,6 +438,16 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
     let mainClosedIncome = 0;
     let mainClosedExpense = 0;
     let businessRefundExpense = 0;
+    let pendingCount = 0;
+    let pendingAmount = 0;
+    let pendingDueSoon1Count = 0;
+    let pendingDueSoon1Amount = 0;
+    let pendingDueSoon3Count = 0;
+    let pendingDueSoon3Amount = 0;
+    let pendingDueSoon7Count = 0;
+    let pendingDueSoon7Amount = 0;
+    let pendingOverdueCount = 0;
+    let pendingOverdueAmount = 0;
     const nowMs = Date.now();
 
     for (const record of records) {
@@ -502,7 +536,10 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
         directionKey === "income" &&
         MAIN_PENDING_STATUSES.has(statusKey)
       ) {
-        const ageDays = Math.max(0, Math.floor((nowMs - record.transactionTime.getTime()) / (24 * 60 * 60 * 1000)));
+        const ageDays = Math.max(
+          0,
+          Math.floor((nowMs - record.transactionTime.getTime()) / MILLIS_PER_DAY)
+        );
         const bucket = findPendingAgingBucket(ageDays);
         const pendingPrev = pendingAgingAgg.get(bucket.key) ?? {
           label: bucket.label,
@@ -515,6 +552,64 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
           ...pendingPrev,
           count: pendingPrev.count + 1,
           amount: pendingPrev.amount + amount
+        });
+
+        pendingCount += 1;
+        pendingAmount += amount;
+
+        const expectedArrivalTime = calcExpectedArrivalTime(record.transactionTime);
+        const expectedArrivalDay = toDateKeyInChina(expectedArrivalTime);
+        const expectedDayPrev = pendingExpectedDayAgg.get(expectedArrivalDay) ?? {
+          day: expectedArrivalDay,
+          count: 0,
+          amount: 0
+        };
+        pendingExpectedDayAgg.set(expectedArrivalDay, {
+          ...expectedDayPrev,
+          count: expectedDayPrev.count + 1,
+          amount: expectedDayPrev.amount + amount
+        });
+
+        const remainDays = calcRemainingDays(expectedArrivalTime, nowMs);
+        const isOverdue = remainDays < 0;
+        const isDueSoon1 = remainDays >= 0 && remainDays <= 1;
+        const isDueSoon3 = remainDays >= 0 && remainDays <= 3;
+        const isDueSoon7 = remainDays >= 0 && remainDays <= 7;
+
+        if (isDueSoon1) {
+          pendingDueSoon1Count += 1;
+          pendingDueSoon1Amount += amount;
+        }
+        if (isDueSoon3) {
+          pendingDueSoon3Count += 1;
+          pendingDueSoon3Amount += amount;
+        }
+        if (isDueSoon7) {
+          pendingDueSoon7Count += 1;
+          pendingDueSoon7Amount += amount;
+        }
+        if (isOverdue) {
+          pendingOverdueCount += 1;
+          pendingOverdueAmount += amount;
+        }
+
+        const pendingAccountPrev = pendingAccountAgg.get(accountKey) ?? {
+          billAccount: accountKey,
+          count: 0,
+          amount: 0,
+          dueSoon3Count: 0,
+          dueSoon3Amount: 0,
+          overdueCount: 0,
+          overdueAmount: 0
+        };
+        pendingAccountAgg.set(accountKey, {
+          billAccount: accountKey,
+          count: pendingAccountPrev.count + 1,
+          amount: pendingAccountPrev.amount + amount,
+          dueSoon3Count: pendingAccountPrev.dueSoon3Count + (isDueSoon3 ? 1 : 0),
+          dueSoon3Amount: pendingAccountPrev.dueSoon3Amount + (isDueSoon3 ? amount : 0),
+          overdueCount: pendingAccountPrev.overdueCount + (isOverdue ? 1 : 0),
+          overdueAmount: pendingAccountPrev.overdueAmount + (isOverdue ? amount : 0)
         });
       }
 
@@ -678,6 +773,37 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
           amount: round2(row?.amount ?? 0)
         };
       }),
+      pendingOverview: {
+        autoConfirmDays: AUTO_CONFIRM_DAYS,
+        pendingCount,
+        pendingAmount: round2(pendingAmount),
+        dueSoon1Count: pendingDueSoon1Count,
+        dueSoon1Amount: round2(pendingDueSoon1Amount),
+        dueSoon3Count: pendingDueSoon3Count,
+        dueSoon3Amount: round2(pendingDueSoon3Amount),
+        dueSoon7Count: pendingDueSoon7Count,
+        dueSoon7Amount: round2(pendingDueSoon7Amount),
+        overdueCount: pendingOverdueCount,
+        overdueAmount: round2(pendingOverdueAmount)
+      },
+      pendingExpectedByDay: [...pendingExpectedDayAgg.values()]
+        .map((item) => ({
+          day: item.day,
+          count: item.count,
+          amount: round2(item.amount)
+        }))
+        .sort((left, right) => left.day.localeCompare(right.day)),
+      pendingByBillAccount: [...pendingAccountAgg.values()]
+        .map((item) => ({
+          billAccount: item.billAccount,
+          count: item.count,
+          amount: round2(item.amount),
+          dueSoon3Count: item.dueSoon3Count,
+          dueSoon3Amount: round2(item.dueSoon3Amount),
+          overdueCount: item.overdueCount,
+          overdueAmount: round2(item.overdueAmount)
+        }))
+        .sort((left, right) => right.amount - left.amount),
       byAccountCategory: [...accountCategoryAgg.values()]
         .map((item) => ({
           billAccount: item.billAccount,
