@@ -292,23 +292,134 @@ export async function queryProfitSummaryNumbers(
   filters: ProfitFilters,
   client: ProfitClient = prisma
 ): Promise<ProfitSummaryNumbers> {
-  const records = await client.qualifiedTransaction.findMany({
-    where: buildProfitBaseWhere(filters),
-    select: {
-      id: true,
-      transactionTime: true,
-      billAccount: true,
-      description: true,
-      direction: true,
-      amount: true,
-      status: true,
-      category: true,
-      orderId: true,
-      internalTransfer: true
+  const groupedQuery = (
+    client.qualifiedTransaction as unknown as {
+      groupBy?: typeof client.qualifiedTransaction.groupBy;
+    }
+  ).groupBy;
+
+  if (typeof groupedQuery !== "function") {
+    const records = await client.qualifiedTransaction.findMany({
+      where: buildProfitBaseWhere(filters),
+      select: {
+        id: true,
+        transactionTime: true,
+        billAccount: true,
+        description: true,
+        direction: true,
+        amount: true,
+        status: true,
+        category: true,
+        orderId: true,
+        internalTransfer: true
+      }
+    });
+
+    return computeProfitSummaryNumbers(records);
+  }
+
+  const groupedRows = await client.qualifiedTransaction.groupBy({
+    by: ["category", "direction", "status"],
+    where: {
+      ...buildProfitBaseWhere(filters),
+      internalTransfer: false
+    },
+    _sum: {
+      amount: true
     }
   });
 
-  return computeProfitSummaryNumbers(records);
+  const summary: ProfitSummaryNumbers = {
+    mainSettledIncome: 0,
+    mainPendingIncome: 0,
+    mainExpense: 0,
+    trafficCost: 0,
+    platformCommission: 0,
+    mainClosedAmount: 0,
+    mainClosedIncome: 0,
+    mainClosedExpense: 0,
+    businessRefundExpense: 0,
+    pureProfitSettled: 0,
+    pureProfitWithPending: 0
+  };
+
+  for (const row of groupedRows) {
+    const amount = Number(row._sum.amount?.toString() ?? "0");
+    if (amount === 0) {
+      continue;
+    }
+
+    if (isMainProfitCategory(row.category)) {
+      if (row.direction === "income") {
+        if (row.status === SUCCESS_STATUS) {
+          summary.mainSettledIncome += amount;
+        } else if (isMainPendingStatus(row.status)) {
+          summary.mainPendingIncome += amount;
+        }
+      } else if (row.direction === "expense") {
+        summary.mainExpense += amount;
+      }
+      continue;
+    }
+
+    if (row.category === "traffic_cost") {
+      summary.trafficCost += amount;
+      continue;
+    }
+
+    if (row.category === "platform_commission") {
+      summary.platformCommission += amount;
+      continue;
+    }
+
+    if (row.category === "closed") {
+      summary.mainClosedAmount += amount;
+      if (row.direction === "income") {
+        summary.mainClosedIncome += amount;
+      } else if (row.direction === "expense") {
+        summary.mainClosedExpense += amount;
+      }
+      continue;
+    }
+
+    if (row.category === "business_refund_expense") {
+      summary.businessRefundExpense += amount;
+    }
+  }
+
+  summary.mainSettledIncome = round2(summary.mainSettledIncome);
+  summary.mainPendingIncome = round2(summary.mainPendingIncome);
+  summary.mainExpense = round2(summary.mainExpense);
+  summary.trafficCost = round2(summary.trafficCost);
+  summary.platformCommission = round2(summary.platformCommission);
+  summary.mainClosedAmount = round2(summary.mainClosedAmount);
+  summary.mainClosedIncome = round2(summary.mainClosedIncome);
+  summary.mainClosedExpense = round2(summary.mainClosedExpense);
+  summary.businessRefundExpense = round2(summary.businessRefundExpense);
+
+  const closedNetContribution = shouldIncludeClosedDirectionInProfit()
+    ? round2(summary.mainClosedIncome - summary.mainClosedExpense)
+    : 0;
+
+  // Keep existing report口径兼容：pureProfit不额外扣除businessRefundExpense。
+  summary.pureProfitSettled = round2(
+    summary.mainSettledIncome -
+      summary.mainExpense -
+      summary.trafficCost -
+      summary.platformCommission +
+      closedNetContribution
+  );
+
+  summary.pureProfitWithPending = round2(
+    summary.mainSettledIncome +
+      summary.mainPendingIncome -
+      summary.mainExpense -
+      summary.trafficCost -
+      summary.platformCommission +
+      closedNetContribution
+  );
+
+  return summary;
 }
 
 export async function queryProfitSummary(

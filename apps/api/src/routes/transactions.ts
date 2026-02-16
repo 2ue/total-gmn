@@ -273,12 +273,14 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
     }
 
     const where = buildTransactionWhere(parsed.data);
-    const records = await prisma.qualifiedTransaction.findMany({
+    const records = await prisma.qualifiedTransaction.groupBy({
+      by: ["direction", "status"],
       where,
-      select: {
-        amount: true,
-        direction: true,
-        status: true
+      _count: {
+        _all: true
+      },
+      _sum: {
+        amount: true
       }
     });
 
@@ -287,23 +289,25 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
     let incomeCount = 0;
     let expenseCount = 0;
     let successCount = 0;
+    let totalCount = 0;
 
     for (const record of records) {
-      const amount = Number(record.amount.toString());
+      const amount = Number(record._sum.amount?.toString() ?? "0");
+      const count = record._count._all;
+      totalCount += count;
       if (record.direction === "income") {
         incomeAmount += amount;
-        incomeCount += 1;
+        incomeCount += count;
       } else if (record.direction === "expense") {
         expenseAmount += amount;
-        expenseCount += 1;
+        expenseCount += count;
       }
 
       if (record.status === "交易成功") {
-        successCount += 1;
+        successCount += count;
       }
     }
 
-    const totalCount = records.length;
     const pendingCount = totalCount - successCount;
 
     return reply.send({
@@ -331,19 +335,34 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
     const records = await prisma.qualifiedTransaction.findMany({
       where,
       select: {
+        batchId: true,
         transactionTime: true,
         billAccount: true,
         category: true,
         status: true,
         direction: true,
-        amount: true,
-        batch: {
-          select: {
-            sourceType: true
-          }
-        }
+        amount: true
       }
     });
+
+    const batchIdSet = new Set(records.map((record) => record.batchId));
+    const sourceTypeByBatchId = new Map<string, string>();
+    if (batchIdSet.size > 0) {
+      const batchRows = await prisma.importBatch.findMany({
+        where: {
+          id: {
+            in: [...batchIdSet]
+          }
+        },
+        select: {
+          id: true,
+          sourceType: true
+        }
+      });
+      for (const row of batchRows) {
+        sourceTypeByBatchId.set(row.id, row.sourceType);
+      }
+    }
 
     const settlementWhere: Prisma.SettlementBatchWhereInput = {};
     if (parsed.data.start || parsed.data.end) {
@@ -457,7 +476,7 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
       const dayKey = toDateKeyInChina(record.transactionTime);
       const statusKey = record.status || "unknown";
       const directionKey = record.direction || "neutral";
-      const sourceTypeKey = record.batch?.sourceType || "unknown";
+      const sourceTypeKey = sourceTypeByBatchId.get(record.batchId) || "unknown";
       const isIncome = directionKey === "income";
       const isExpense = directionKey === "expense";
 

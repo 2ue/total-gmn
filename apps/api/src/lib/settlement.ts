@@ -590,13 +590,148 @@ async function queryIncrementalNet(
   includeClosedDirectionInProfit: boolean,
   client: SettlementClient
 ): Promise<IncrementalPeriodResult> {
+  const where = buildIncrementalCandidateWhere(
+    settlementTime,
+    billAccount,
+    unsettledOnly,
+    includeClosedDirectionInProfit
+  );
+
+  if (!unsettledOnly) {
+    const groupedQuery = (
+      client.qualifiedTransaction as unknown as {
+        groupBy?: typeof client.qualifiedTransaction.groupBy;
+      }
+    ).groupBy;
+
+    if (typeof groupedQuery !== "function") {
+      const rows = await client.qualifiedTransaction.findMany({
+        where,
+        select: {
+          category: true,
+          direction: true,
+          status: true,
+          amount: true
+        }
+      });
+
+      let settledIncome = 0;
+      let mainExpense = 0;
+      let trafficCost = 0;
+      let platformCommission = 0;
+      let businessRefundExpense = 0;
+
+      for (const row of rows) {
+        const amount = toNumber(row.amount);
+
+        if (row.category === "main_business" || row.category === "manual_add") {
+          if (row.direction === "income" && row.status === SUCCESS_STATUS) {
+            settledIncome += amount;
+          } else if (row.direction === "expense") {
+            mainExpense += amount;
+          }
+          continue;
+        }
+
+        if (row.category === "traffic_cost") {
+          trafficCost += amount;
+          continue;
+        }
+
+        if (row.category === "platform_commission") {
+          platformCommission += amount;
+          continue;
+        }
+
+        if (row.category === "business_refund_expense") {
+          businessRefundExpense += amount;
+          continue;
+        }
+
+        if (includeClosedDirectionInProfit && row.category === "closed") {
+          if (row.direction === "income") {
+            settledIncome += amount;
+          } else if (row.direction === "expense") {
+            mainExpense += amount;
+          }
+        }
+      }
+
+      const periodNetAmount = round2(
+        settledIncome - mainExpense - trafficCost - platformCommission - businessRefundExpense
+      );
+
+      return {
+        periodNetAmount,
+        candidateIds: []
+      };
+    }
+
+    const groupedRows = await client.qualifiedTransaction.groupBy({
+      by: ["category", "direction", "status"],
+      where,
+      _sum: {
+        amount: true
+      }
+    });
+
+    let settledIncome = 0;
+    let mainExpense = 0;
+    let trafficCost = 0;
+    let platformCommission = 0;
+    let businessRefundExpense = 0;
+
+    for (const row of groupedRows) {
+      const amount = Number(row._sum.amount?.toString() ?? "0");
+      if (amount === 0) {
+        continue;
+      }
+
+      if (row.category === "main_business" || row.category === "manual_add") {
+        if (row.direction === "income" && row.status === SUCCESS_STATUS) {
+          settledIncome += amount;
+        } else if (row.direction === "expense") {
+          mainExpense += amount;
+        }
+        continue;
+      }
+
+      if (row.category === "traffic_cost") {
+        trafficCost += amount;
+        continue;
+      }
+
+      if (row.category === "platform_commission") {
+        platformCommission += amount;
+        continue;
+      }
+
+      if (row.category === "business_refund_expense") {
+        businessRefundExpense += amount;
+        continue;
+      }
+
+      if (includeClosedDirectionInProfit && row.category === "closed") {
+        if (row.direction === "income") {
+          settledIncome += amount;
+        } else if (row.direction === "expense") {
+          mainExpense += amount;
+        }
+      }
+    }
+
+    const periodNetAmount = round2(
+      settledIncome - mainExpense - trafficCost - platformCommission - businessRefundExpense
+    );
+
+    return {
+      periodNetAmount,
+      candidateIds: []
+    };
+  }
+
   const rows = await client.qualifiedTransaction.findMany({
-    where: buildIncrementalCandidateWhere(
-      settlementTime,
-      billAccount,
-      unsettledOnly,
-      includeClosedDirectionInProfit
-    ),
+    where,
     select: {
       id: true,
       category: true,

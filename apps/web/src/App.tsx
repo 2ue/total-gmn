@@ -632,7 +632,7 @@ export default function App() {
 
     if (tab === "details") {
       setDetailsPage(1);
-      void fetchTransactions(1);
+      void fetchTransactions(1, true);
       return;
     }
 
@@ -1169,7 +1169,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
     setChartDetailError("");
   }
 
-  async function fetchTransactions(page = detailsPage) {
+  async function fetchTransactions(page = detailsPage, includeSummary = false) {
     setLoadingRows(true);
     setRowsError("");
 
@@ -1184,10 +1184,11 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
       const query = buildTransactionFilterQuery(input);
       query.set("page", String(page));
       query.set("pageSize", filters.pageSize);
-
+      const rowsResponsePromise = fetch(`${API_BASE}/transactions?${query.toString()}`);
+      const summaryPromise = includeSummary ? queryTransactionSummary(input) : null;
       const [rowsResponse, summary] = await Promise.all([
-        fetch(`${API_BASE}/transactions?${query.toString()}`),
-        queryTransactionSummary(input)
+        rowsResponsePromise,
+        summaryPromise ?? Promise.resolve(null)
       ]);
 
       if (!rowsResponse.ok) {
@@ -1197,7 +1198,9 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
 
       const body = (await rowsResponse.json()) as TransactionResponse;
       setRows(body);
-      setTransactionSummary(summary);
+      if (summary) {
+        setTransactionSummary(summary);
+      }
       setDetailsPage(body.page);
     } catch (error) {
       setRowsError(error instanceof Error ? error.message : "查询失败");
@@ -1266,7 +1269,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
       if (transactionDetail?.id === id) {
         setTransactionDetail(null);
       }
-      await fetchTransactions(detailsPage);
+      await fetchTransactions(detailsPage, true);
     } catch (error) {
       setRowsError(error instanceof Error ? error.message : "删除失败");
     } finally {
@@ -1789,13 +1792,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
       setSettlementPreview(preview);
       setSettlementBatches(batches);
       setExpandedSettlementBatchIds({});
-
-      if (settlementDetailBillAccount) {
-        const detailPreview = await querySettlementPreview(strategy, settlementDetailBillAccount);
-        setSettlementDetailPreview(detailPreview);
-      } else {
-        setSettlementDetailPreview(null);
-      }
+      setSettlementDetailPreview(null);
     } catch (error) {
       setSettlementError(error instanceof Error ? error.message : "分润加载失败");
     } finally {
@@ -2315,7 +2312,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
             onSubmit={(event) => {
               event.preventDefault();
               setDetailsPage(1);
-              void fetchTransactions(1);
+              void fetchTransactions(1, true);
             }}
           >
             <label className="grid gap-1 text-sm">
@@ -3481,7 +3478,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
               <p className="text-sm font-semibold">本次分配明细（按实发计算，负值时按应支出显示）</p>
               <p className="mt-1 text-xs text-[var(--muted)]">分配基数：{settlementPreview.allocationBaseAmount}</p>
               <p className="mt-1 text-xs text-[var(--muted)]">
-                实际应收/应付 = 本次应收/应支 - 账号已收（估算）。账号已收按绑定账号净额占比折算到本次分配基数。
+                实际应收/应付 = 本次应收/应支 - 账号实收。账号实收按绑定账号净额占比折算到本次分配基数。
               </p>
               <div className="mt-3 overflow-x-auto rounded-lg border border-[var(--border)]">
                 <table className="min-w-full border-collapse text-sm">
@@ -3491,7 +3488,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
                       <th className="px-3 py-2">账单账号</th>
                       <th className="px-3 py-2">比例</th>
                       <th className="px-3 py-2">本次应收/应支</th>
-                      <th className="px-3 py-2">账号已收（估算）</th>
+                      <th className="px-3 py-2">账号实收</th>
                       <th className="px-3 py-2">实际应收/应付</th>
                       <th className="px-3 py-2">备注</th>
                     </tr>
@@ -3662,7 +3659,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
                                     <th className="px-2 py-1.5">账单账号</th>
                                     <th className="px-2 py-1.5">比例</th>
                                     <th className="px-2 py-1.5">应收/应支</th>
-                                    <th className="px-2 py-1.5">账号已收（估算）</th>
+                                    <th className="px-2 py-1.5">账号实收</th>
                                     <th className="px-2 py-1.5">实际应收/应付</th>
                                     <th className="px-2 py-1.5">备注</th>
                                   </tr>
