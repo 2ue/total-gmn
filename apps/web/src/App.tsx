@@ -143,6 +143,7 @@ interface TransactionFilterInput {
   category: string;
   status: string;
   direction?: string;
+  sourceType?: string;
 }
 
 interface TransactionQuerySummary {
@@ -188,6 +189,72 @@ interface TransactionChartsData {
     count: number;
     amount: number;
   }>;
+  byStatusDirection: Array<{
+    status: string;
+    direction: string;
+    count: number;
+    amount: number;
+  }>;
+  pendingAging: Array<{
+    bucket: string;
+    label: string;
+    minDays: number;
+    maxDays: number | null;
+    count: number;
+    amount: number;
+  }>;
+  byAccountCategory: Array<{
+    billAccount: string;
+    category: string;
+    count: number;
+    incomeAmount: number;
+    expenseAmount: number;
+    netAmount: number;
+  }>;
+  bySourceType: Array<{
+    sourceType: string;
+    count: number;
+    incomeAmount: number;
+    expenseAmount: number;
+    netAmount: number;
+  }>;
+  keyRatios: {
+    mainIncomeBase: number;
+    pureProfitSettled: number;
+    pureProfitWithPending: number;
+    pendingIncomeRate: number;
+    trafficCostRate: number;
+    platformCommissionRate: number;
+    closedAmountRate: number;
+    refundAmountRate: number;
+    pureProfitSettledRate: number;
+    pureProfitWithPendingRate: number;
+  };
+  byClosedRefundDay: Array<{
+    day: string;
+    closedCount: number;
+    refundCount: number;
+    closedAmount: number;
+    refundAmount: number;
+  }>;
+  settlementOverview: {
+    totalBatches: number;
+    effectiveBatchNo: string | null;
+    byStrategy: Array<{
+      strategy: string;
+      count: number;
+      distributableAmount: number;
+      paidAmount: number;
+      carryForwardAmount: number;
+    }>;
+    byDay: Array<{
+      day: string;
+      batchCount: number;
+      distributableAmount: number;
+      paidAmount: number;
+      carryForwardAmount: number;
+    }>;
+  };
 }
 
 interface ChartDetailFilters {
@@ -197,6 +264,7 @@ interface ChartDetailFilters {
   category?: string;
   status?: string;
   direction?: string;
+  sourceType?: string;
 }
 
 interface ProfitSummary {
@@ -880,10 +948,10 @@ export default function App() {
     }
   }
 
-  function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchParams {
-    const query = buildDateFilterQuery(reportFilterToDateRange(input.start, input.end));
-    if (input.billAccount) {
-      query.set("billAccount", input.billAccount);
+function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchParams {
+  const query = buildDateFilterQuery(reportFilterToDateRange(input.start, input.end));
+  if (input.billAccount) {
+    query.set("billAccount", input.billAccount);
     }
     if (input.category) {
       query.set("category", input.category);
@@ -891,11 +959,14 @@ export default function App() {
     if (input.status) {
       query.set("status", input.status);
     }
-    if (input.direction) {
-      query.set("direction", input.direction);
-    }
-    return query;
+  if (input.direction) {
+    query.set("direction", input.direction);
   }
+  if (input.sourceType) {
+    query.set("sourceType", input.sourceType);
+  }
+  return query;
+}
 
   async function queryTransactionSummary(input: TransactionFilterInput): Promise<TransactionQuerySummary> {
     const query = buildTransactionFilterQuery(input);
@@ -937,7 +1008,30 @@ export default function App() {
       byBillAccount: body.byBillAccount ?? [],
       byDay: body.byDay ?? [],
       byStatus: body.byStatus ?? [],
-      byDirection: body.byDirection ?? []
+      byDirection: body.byDirection ?? [],
+      byStatusDirection: body.byStatusDirection ?? [],
+      pendingAging: body.pendingAging ?? [],
+      byAccountCategory: body.byAccountCategory ?? [],
+      bySourceType: body.bySourceType ?? [],
+      keyRatios: {
+        mainIncomeBase: body.keyRatios?.mainIncomeBase ?? 0,
+        pureProfitSettled: body.keyRatios?.pureProfitSettled ?? 0,
+        pureProfitWithPending: body.keyRatios?.pureProfitWithPending ?? 0,
+        pendingIncomeRate: body.keyRatios?.pendingIncomeRate ?? 0,
+        trafficCostRate: body.keyRatios?.trafficCostRate ?? 0,
+        platformCommissionRate: body.keyRatios?.platformCommissionRate ?? 0,
+        closedAmountRate: body.keyRatios?.closedAmountRate ?? 0,
+        refundAmountRate: body.keyRatios?.refundAmountRate ?? 0,
+        pureProfitSettledRate: body.keyRatios?.pureProfitSettledRate ?? 0,
+        pureProfitWithPendingRate: body.keyRatios?.pureProfitWithPendingRate ?? 0
+      },
+      byClosedRefundDay: body.byClosedRefundDay ?? [],
+      settlementOverview: {
+        totalBatches: body.settlementOverview?.totalBatches ?? 0,
+        effectiveBatchNo: body.settlementOverview?.effectiveBatchNo ?? null,
+        byStrategy: body.settlementOverview?.byStrategy ?? [],
+        byDay: body.settlementOverview?.byDay ?? []
+      }
     };
   }
 
@@ -994,6 +1088,9 @@ export default function App() {
       }
       if (input.direction) {
         query.set("direction", input.direction);
+      }
+      if (input.sourceType) {
+        query.set("sourceType", input.sourceType);
       }
       query.set("page", String(page));
       query.set("pageSize", chartDetailPageSize);
@@ -1725,6 +1822,13 @@ export default function App() {
   );
   const chartStatusSource = chartData?.byStatus ?? [];
   const chartDirectionSource = chartData?.byDirection ?? [];
+  const chartStatusDirectionSource = chartData?.byStatusDirection ?? [];
+  const chartPendingAgingSource = chartData?.pendingAging ?? [];
+  const chartAccountCategorySource = (chartData?.byAccountCategory ?? []).slice(0, 20);
+  const chartSourceTypeSource = chartData?.bySourceType ?? [];
+  const chartClosedRefundDaySource = [...(chartData?.byClosedRefundDay ?? [])].sort((left, right) =>
+    right.day.localeCompare(left.day)
+  );
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-4 px-3 py-5 sm:px-6">
@@ -2311,11 +2415,17 @@ export default function App() {
       {tab === "charts" ? (
         <section className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-sm">
           <div className="mb-4 rounded-xl border border-[var(--border)] bg-slate-50 p-4 text-sm text-[var(--muted)]">
-            <p className="font-semibold text-[var(--text)]">建议图表维度（已实现第一版）</p>
+            <p className="font-semibold text-[var(--text)]">建议图表维度（已实现增强版）</p>
             <p className="mt-1">1. 分类维度：看哪些分类贡献净额最高（柱状图）</p>
             <p>2. 账号维度：看不同账号的收入、支出、净额差异（柱状图）</p>
             <p>3. 时间维度：按天看趋势波动（柱状图）</p>
             <p>4. 状态/收支维度：看结构占比（饼图）</p>
+            <p>5. 状态 × 收支：定位异常结构（二维表）</p>
+            <p>6. 待确认账龄：看待到账积压风险（分桶）</p>
+            <p>7. 账号 × 分类：看每个账号的分类贡献（明细表）</p>
+            <p>8. 来源类型：看导入来源结构（饼图）</p>
+            <p>9. 关键比率：看抽成率/流量率/净利率（指标卡）</p>
+            <p>10. 关闭/退款趋势、分润批次视角（趋势+台账）</p>
           </div>
 
           <form
@@ -2386,6 +2496,10 @@ export default function App() {
                 value={String(chartData.byBillAccount.length)}
               />
               <MetricCard label="日期点数" value={String(chartData.byDay.length)} />
+              <MetricCard label="状态×收支组合数" value={String(chartData.byStatusDirection.length)} />
+              <MetricCard label="账号×分类组合数" value={String(chartData.byAccountCategory.length)} />
+              <MetricCard label="来源类型数" value={String(chartData.bySourceType.length)} />
+              <MetricCard label="分润批次数" value={String(chartData.settlementOverview.totalBatches)} />
             </div>
           ) : null}
 
@@ -2480,6 +2594,276 @@ export default function App() {
                   });
                 }}
               />
+            </div>
+          ) : null}
+
+          {chartData ? (
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-xl border border-[var(--border)] bg-white p-4">
+                <h3 className="text-sm font-semibold">状态 × 收支（按笔数/金额）</h3>
+                <div className="mt-3 overflow-auto">
+                  <table className="min-w-full border-collapse text-xs">
+                    <thead className="bg-slate-100 text-left text-[var(--muted)]">
+                      <tr>
+                        <th className="px-2 py-1.5">状态</th>
+                        <th className="px-2 py-1.5">收支</th>
+                        <th className="px-2 py-1.5">笔数</th>
+                        <th className="px-2 py-1.5">金额</th>
+                        <th className="px-2 py-1.5">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {chartStatusDirectionSource.map((item, index) => (
+                        <tr key={`${item.status}-${item.direction}-${index}`} className="border-t border-[var(--border)]">
+                          <td className="px-2 py-1.5">{item.status || "未知"}</td>
+                          <td className="px-2 py-1.5">{mapDirectionLabel(item.direction)}</td>
+                          <td className="px-2 py-1.5">{item.count}</td>
+                          <td className="px-2 py-1.5">{item.amount.toFixed(2)}</td>
+                          <td className="px-2 py-1.5">
+                            <button
+                              type="button"
+                              className="rounded-lg border border-[var(--border)] px-2 py-0.5 text-xs"
+                              onClick={() =>
+                                openChartDetail(
+                                  `状态×收支 · ${item.status || "未知"} / ${mapDirectionLabel(item.direction)}`,
+                                  {
+                                    ...buildChartBaseDetailFilters(),
+                                    ...(item.status ? { status: item.status } : {}),
+                                    direction: item.direction
+                                  }
+                                )
+                              }
+                            >
+                              查看明细
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {chartStatusDirectionSource.length === 0 ? (
+                        <tr>
+                          <td className="px-2 py-4 text-center text-[var(--muted)]" colSpan={5}>
+                            暂无数据
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <SimpleBarChart
+                title="待确认账龄（收入，按金额）"
+                unit="元"
+                data={chartPendingAgingSource.map((item) => ({
+                  label: `${item.label}（${item.count}笔）`,
+                  value: item.amount
+                }))}
+              />
+            </div>
+          ) : null}
+
+          {chartData ? (
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-xl border border-[var(--border)] bg-white p-4">
+                <h3 className="text-sm font-semibold">账号 × 分类净额 Top20</h3>
+                <div className="mt-3 max-h-[360px] overflow-auto">
+                  <table className="min-w-full border-collapse text-xs">
+                    <thead className="bg-slate-100 text-left text-[var(--muted)]">
+                      <tr>
+                        <th className="px-2 py-1.5">账号</th>
+                        <th className="px-2 py-1.5">分类</th>
+                        <th className="px-2 py-1.5">笔数</th>
+                        <th className="px-2 py-1.5">净额</th>
+                        <th className="px-2 py-1.5">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {chartAccountCategorySource.map((item, index) => (
+                        <tr key={`${item.billAccount}-${item.category}-${index}`} className="border-t border-[var(--border)]">
+                          <td className="px-2 py-1.5">{formatBillAccountLabel(item.billAccount)}</td>
+                          <td className="px-2 py-1.5">{CATEGORY_LABEL[item.category as Category] ?? item.category}</td>
+                          <td className="px-2 py-1.5">{item.count}</td>
+                          <td className="px-2 py-1.5">{item.netAmount.toFixed(2)}</td>
+                          <td className="px-2 py-1.5">
+                            <button
+                              type="button"
+                              className="rounded-lg border border-[var(--border)] px-2 py-0.5 text-xs"
+                              onClick={() =>
+                                openChartDetail(
+                                  `账号×分类 · ${formatBillAccountLabel(item.billAccount)} / ${
+                                    CATEGORY_LABEL[item.category as Category] ?? item.category
+                                  }`,
+                                  {
+                                    ...buildChartBaseDetailFilters(),
+                                    billAccount: item.billAccount,
+                                    category: item.category
+                                  }
+                                )
+                              }
+                            >
+                              查看明细
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {chartAccountCategorySource.length === 0 ? (
+                        <tr>
+                          <td className="px-2 py-4 text-center text-[var(--muted)]" colSpan={5}>
+                            暂无数据
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <PieBreakdownChart
+                title="来源类型占比（按笔数）"
+                data={chartSourceTypeSource.map((item) => ({
+                  label: item.sourceType || "unknown",
+                  value: item.count
+                }))}
+                onItemClick={(_, index) => {
+                  const source = chartSourceTypeSource[index];
+                  if (!source) {
+                    return;
+                  }
+                  openChartDetail(`来源类型 · ${source.sourceType || "unknown"}`, {
+                    ...buildChartBaseDetailFilters(),
+                    sourceType: source.sourceType
+                  });
+                }}
+              />
+            </div>
+          ) : null}
+
+          {chartData ? (
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <MetricCard label="关键比率基数（主营总收入）" value={chartData.keyRatios.mainIncomeBase.toFixed(2)} />
+              <MetricCard label="纯收益（仅已到账）" value={chartData.keyRatios.pureProfitSettled.toFixed(2)} />
+              <MetricCard label="纯收益（含待到账）" value={chartData.keyRatios.pureProfitWithPending.toFixed(2)} />
+              <MetricCard label="待到账占比" value={`${formatPercent(chartData.keyRatios.pendingIncomeRate)}%`} />
+              <MetricCard label="流量率" value={`${formatPercent(chartData.keyRatios.trafficCostRate)}%`} />
+              <MetricCard label="平台抽成率" value={`${formatPercent(chartData.keyRatios.platformCommissionRate)}%`} />
+              <MetricCard label="关闭金额率" value={`${formatPercent(chartData.keyRatios.closedAmountRate)}%`} />
+              <MetricCard label="退款金额率" value={`${formatPercent(chartData.keyRatios.refundAmountRate)}%`} />
+              <MetricCard label="已到账净利率" value={`${formatPercent(chartData.keyRatios.pureProfitSettledRate)}%`} />
+              <MetricCard label="综合净利率" value={`${formatPercent(chartData.keyRatios.pureProfitWithPendingRate)}%`} />
+            </div>
+          ) : null}
+
+          {chartData ? (
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <SimpleBarChart
+                title="交易关闭趋势（按金额）"
+                unit="元"
+                maxBodyHeightPx={320}
+                data={chartClosedRefundDaySource.map((item) => ({
+                  label: `${item.day}（${item.closedCount}笔）`,
+                  value: item.closedAmount
+                }))}
+                onItemClick={(_, index) => {
+                  const source = chartClosedRefundDaySource[index];
+                  if (!source) {
+                    return;
+                  }
+                  openChartDetail(`交易关闭 · ${source.day}`, {
+                    ...buildChartBaseDetailFilters(),
+                    ...reportFilterToDateRange(source.day, source.day),
+                    category: "closed"
+                  });
+                }}
+              />
+              <SimpleBarChart
+                title="退款支出趋势（按金额）"
+                unit="元"
+                maxBodyHeightPx={320}
+                data={chartClosedRefundDaySource.map((item) => ({
+                  label: `${item.day}（${item.refundCount}笔）`,
+                  value: item.refundAmount
+                }))}
+                onItemClick={(_, index) => {
+                  const source = chartClosedRefundDaySource[index];
+                  if (!source) {
+                    return;
+                  }
+                  openChartDetail(`退款支出 · ${source.day}`, {
+                    ...buildChartBaseDetailFilters(),
+                    ...reportFilterToDateRange(source.day, source.day),
+                    category: "business_refund_expense"
+                  });
+                }}
+              />
+            </div>
+          ) : null}
+
+          {chartData ? (
+            <div className="mt-5 rounded-xl border border-[var(--border)] bg-white p-4">
+              <h3 className="text-sm font-semibold">分润批次视角</h3>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <MetricCard label="批次总数" value={String(chartData.settlementOverview.totalBatches)} />
+                <MetricCard label="当前有效批次" value={chartData.settlementOverview.effectiveBatchNo ?? "无"} />
+                <MetricCard
+                  label="分润策略数"
+                  value={String(chartData.settlementOverview.byStrategy.length)}
+                />
+              </div>
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <SimpleBarChart
+                  title="分润实发趋势（按结算日）"
+                  unit="元"
+                  maxBodyHeightPx={320}
+                  data={[...chartData.settlementOverview.byDay]
+                    .sort((left, right) => right.day.localeCompare(left.day))
+                    .map((item) => ({
+                      label: `${item.day}（${item.batchCount}批）`,
+                      value: item.paidAmount
+                    }))}
+                />
+                <SimpleBarChart
+                  title="留存结转趋势（按结算日）"
+                  unit="元"
+                  maxBodyHeightPx={320}
+                  data={[...chartData.settlementOverview.byDay]
+                    .sort((left, right) => right.day.localeCompare(left.day))
+                    .map((item) => ({
+                      label: `${item.day}（${item.batchCount}批）`,
+                      value: item.carryForwardAmount
+                    }))}
+                />
+              </div>
+              <div className="mt-4 overflow-auto rounded-lg border border-[var(--border)]">
+                <table className="min-w-full border-collapse text-xs">
+                  <thead className="bg-slate-100 text-left text-[var(--muted)]">
+                    <tr>
+                      <th className="px-2 py-1.5">策略</th>
+                      <th className="px-2 py-1.5">批次数</th>
+                      <th className="px-2 py-1.5">可分润总额</th>
+                      <th className="px-2 py-1.5">实发总额</th>
+                      <th className="px-2 py-1.5">留存总额</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {chartData.settlementOverview.byStrategy.map((item) => (
+                      <tr key={item.strategy} className="border-t border-[var(--border)]">
+                        <td className="px-2 py-1.5">{item.strategy === "cumulative" ? "累计分润" : "增量分润"}</td>
+                        <td className="px-2 py-1.5">{item.count}</td>
+                        <td className="px-2 py-1.5">{item.distributableAmount.toFixed(2)}</td>
+                        <td className="px-2 py-1.5">{item.paidAmount.toFixed(2)}</td>
+                        <td className="px-2 py-1.5">{item.carryForwardAmount.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                    {chartData.settlementOverview.byStrategy.length === 0 ? (
+                      <tr>
+                        <td className="px-2 py-4 text-center text-[var(--muted)]" colSpan={5}>
+                          当前筛选下无分润批次
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : null}
         </section>

@@ -13,6 +13,7 @@ const querySchema = z.object({
   category: z.string().optional(),
   status: z.string().optional(),
   direction: z.string().optional(),
+  sourceType: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50)
 });
@@ -23,7 +24,8 @@ const summaryQuerySchema = z.object({
   billAccount: z.string().optional(),
   category: z.string().optional(),
   status: z.string().optional(),
-  direction: z.string().optional()
+  direction: z.string().optional(),
+  sourceType: z.string().optional()
 });
 
 const idParamSchema = z.object({
@@ -100,6 +102,45 @@ function toDateKeyInChina(date: Date): string {
   return chinaTime.toISOString().slice(0, 10);
 }
 
+const MAIN_PENDING_STATUSES = new Set([
+  "等待对方确认收货",
+  "等待发货",
+  "等待对方付款",
+  "等待确认收货"
+]);
+
+const MAIN_INCOME_CATEGORIES = new Set(["main_business", "manual_add"]);
+
+const PENDING_AGING_BUCKETS = [
+  { key: "0_1", label: "0-1天", min: 0, max: 1 },
+  { key: "2_3", label: "2-3天", min: 2, max: 3 },
+  { key: "4_7", label: "4-7天", min: 4, max: 7 },
+  { key: "8_14", label: "8-14天", min: 8, max: 14 },
+  { key: "15_plus", label: "15天以上", min: 15, max: null }
+] as const;
+
+function findPendingAgingBucket(days: number): (typeof PENDING_AGING_BUCKETS)[number] {
+  for (const bucket of PENDING_AGING_BUCKETS) {
+    if (bucket.max === null) {
+      if (days >= bucket.min) {
+        return bucket;
+      }
+      continue;
+    }
+    if (days >= bucket.min && days <= bucket.max) {
+      return bucket;
+    }
+  }
+  return PENDING_AGING_BUCKETS[PENDING_AGING_BUCKETS.length - 1]!;
+}
+
+function toPercent(numerator: number, denominator: number): number {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
+    return 0;
+  }
+  return round2((numerator / denominator) * 100);
+}
+
 function buildTransactionWhere(input: {
   start?: string | undefined;
   end?: string | undefined;
@@ -107,6 +148,7 @@ function buildTransactionWhere(input: {
   category?: string | undefined;
   status?: string | undefined;
   direction?: string | undefined;
+  sourceType?: string | undefined;
 }): Prisma.QualifiedTransactionWhereInput {
   const where: Prisma.QualifiedTransactionWhereInput = {};
 
@@ -139,6 +181,13 @@ function buildTransactionWhere(input: {
   }
   if (input.direction) {
     where.direction = input.direction;
+  }
+  if (input.sourceType) {
+    where.batch = {
+      is: {
+        sourceType: input.sourceType
+      }
+    };
   }
 
   return where;
@@ -277,7 +326,48 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
         category: true,
         status: true,
         direction: true,
-        amount: true
+        amount: true,
+        batch: {
+          select: {
+            sourceType: true
+          }
+        }
+      }
+    });
+
+    const settlementWhere: Prisma.SettlementBatchWhereInput = {};
+    if (parsed.data.start || parsed.data.end) {
+      settlementWhere.settlementTime = {};
+      if (parsed.data.start) {
+        const start = new Date(parsed.data.start);
+        if (!Number.isNaN(start.getTime())) {
+          settlementWhere.settlementTime.gte = start;
+        }
+      }
+      if (parsed.data.end) {
+        const end = new Date(parsed.data.end);
+        if (!Number.isNaN(end.getTime())) {
+          settlementWhere.settlementTime.lte = end;
+        }
+      }
+    }
+    if (parsed.data.billAccount) {
+      settlementWhere.billAccount = parsed.data.billAccount;
+    }
+
+    const settlementRows = await prisma.settlementBatch.findMany({
+      where: settlementWhere,
+      orderBy: {
+        settlementTime: "asc"
+      },
+      select: {
+        batchNo: true,
+        strategy: true,
+        settlementTime: true,
+        distributableAmount: true,
+        paidAmount: true,
+        carryForwardAmount: true,
+        isEffective: true
       }
     });
 
@@ -286,6 +376,45 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
     const dayAgg = new Map<string, { count: number; income: number; expense: number }>();
     const statusAgg = new Map<string, number>();
     const directionAgg = new Map<string, { count: number; amount: number }>();
+    const statusDirectionAgg = new Map<string, { status: string; direction: string; count: number; amount: number }>();
+    const pendingAgingAgg = new Map<string, {
+      label: string;
+      minDays: number;
+      maxDays: number | null;
+      count: number;
+      amount: number;
+    }>();
+    const accountCategoryAgg = new Map<string, {
+      billAccount: string;
+      category: string;
+      count: number;
+      income: number;
+      expense: number;
+    }>();
+    const sourceTypeAgg = new Map<string, {
+      sourceType: string;
+      count: number;
+      income: number;
+      expense: number;
+    }>();
+    const closedRefundDayAgg = new Map<string, {
+      day: string;
+      closedAmount: number;
+      refundAmount: number;
+      closedCount: number;
+      refundCount: number;
+    }>();
+
+    let mainSettledIncome = 0;
+    let mainPendingIncome = 0;
+    let mainExpense = 0;
+    let trafficCost = 0;
+    let platformCommission = 0;
+    let mainClosedAmount = 0;
+    let mainClosedIncome = 0;
+    let mainClosedExpense = 0;
+    let businessRefundExpense = 0;
+    const nowMs = Date.now();
 
     for (const record of records) {
       const amount = Number(record.amount.toString());
@@ -294,6 +423,7 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
       const dayKey = toDateKeyInChina(record.transactionTime);
       const statusKey = record.status || "unknown";
       const directionKey = record.direction || "neutral";
+      const sourceTypeKey = record.batch?.sourceType || "unknown";
       const isIncome = directionKey === "income";
       const isExpense = directionKey === "expense";
 
@@ -325,6 +455,166 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
         count: directionPrev.count + 1,
         amount: directionPrev.amount + amount
       });
+
+      const statusDirectionKey = `${statusKey}__${directionKey}`;
+      const statusDirectionPrev = statusDirectionAgg.get(statusDirectionKey) ?? {
+        status: statusKey,
+        direction: directionKey,
+        count: 0,
+        amount: 0
+      };
+      statusDirectionAgg.set(statusDirectionKey, {
+        ...statusDirectionPrev,
+        count: statusDirectionPrev.count + 1,
+        amount: statusDirectionPrev.amount + amount
+      });
+
+      const accountCategoryKey = `${accountKey}__${categoryKey}`;
+      const accountCategoryPrev = accountCategoryAgg.get(accountCategoryKey) ?? {
+        billAccount: accountKey,
+        category: categoryKey,
+        count: 0,
+        income: 0,
+        expense: 0
+      };
+      accountCategoryAgg.set(accountCategoryKey, {
+        ...accountCategoryPrev,
+        count: accountCategoryPrev.count + 1,
+        income: accountCategoryPrev.income + (isIncome ? amount : 0),
+        expense: accountCategoryPrev.expense + (isExpense ? amount : 0)
+      });
+
+      const sourceTypePrev = sourceTypeAgg.get(sourceTypeKey) ?? {
+        sourceType: sourceTypeKey,
+        count: 0,
+        income: 0,
+        expense: 0
+      };
+      sourceTypeAgg.set(sourceTypeKey, {
+        ...sourceTypePrev,
+        count: sourceTypePrev.count + 1,
+        income: sourceTypePrev.income + (isIncome ? amount : 0),
+        expense: sourceTypePrev.expense + (isExpense ? amount : 0)
+      });
+
+      if (
+        MAIN_INCOME_CATEGORIES.has(categoryKey) &&
+        directionKey === "income" &&
+        MAIN_PENDING_STATUSES.has(statusKey)
+      ) {
+        const ageDays = Math.max(0, Math.floor((nowMs - record.transactionTime.getTime()) / (24 * 60 * 60 * 1000)));
+        const bucket = findPendingAgingBucket(ageDays);
+        const pendingPrev = pendingAgingAgg.get(bucket.key) ?? {
+          label: bucket.label,
+          minDays: bucket.min,
+          maxDays: bucket.max,
+          count: 0,
+          amount: 0
+        };
+        pendingAgingAgg.set(bucket.key, {
+          ...pendingPrev,
+          count: pendingPrev.count + 1,
+          amount: pendingPrev.amount + amount
+        });
+      }
+
+      if (categoryKey === "closed" || categoryKey === "business_refund_expense") {
+        const dayPrev = closedRefundDayAgg.get(dayKey) ?? {
+          day: dayKey,
+          closedAmount: 0,
+          refundAmount: 0,
+          closedCount: 0,
+          refundCount: 0
+        };
+        if (categoryKey === "closed") {
+          dayPrev.closedAmount += amount;
+          dayPrev.closedCount += 1;
+        }
+        if (categoryKey === "business_refund_expense") {
+          dayPrev.refundAmount += amount;
+          dayPrev.refundCount += 1;
+        }
+        closedRefundDayAgg.set(dayKey, dayPrev);
+      }
+
+      if (MAIN_INCOME_CATEGORIES.has(categoryKey)) {
+        if (directionKey === "income") {
+          if (statusKey === "交易成功") {
+            mainSettledIncome += amount;
+          } else if (MAIN_PENDING_STATUSES.has(statusKey)) {
+            mainPendingIncome += amount;
+          }
+        } else if (directionKey === "expense") {
+          mainExpense += amount;
+        }
+      } else if (categoryKey === "traffic_cost") {
+        trafficCost += amount;
+      } else if (categoryKey === "platform_commission") {
+        platformCommission += amount;
+      } else if (categoryKey === "closed") {
+        mainClosedAmount += amount;
+        if (directionKey === "income") {
+          mainClosedIncome += amount;
+        } else if (directionKey === "expense") {
+          mainClosedExpense += amount;
+        }
+      } else if (categoryKey === "business_refund_expense") {
+        businessRefundExpense += amount;
+      }
+    }
+
+    const closedDirectionDelta = mainClosedIncome - mainClosedExpense;
+    const pureProfitSettled = mainSettledIncome - mainExpense - trafficCost - platformCommission - businessRefundExpense + closedDirectionDelta;
+    const pureProfitWithPending = pureProfitSettled + mainPendingIncome;
+    const mainIncomeBase = mainSettledIncome + mainPendingIncome;
+
+    const settlementByStrategyMap = new Map<string, {
+      strategy: string;
+      count: number;
+      distributableAmount: number;
+      paidAmount: number;
+      carryForwardAmount: number;
+    }>();
+    const settlementByDayMap = new Map<string, {
+      day: string;
+      batchCount: number;
+      distributableAmount: number;
+      paidAmount: number;
+      carryForwardAmount: number;
+    }>();
+
+    let effectiveBatchNo: string | null = null;
+    for (const batch of settlementRows) {
+      if (batch.isEffective) {
+        effectiveBatchNo = batch.batchNo;
+      }
+
+      const strategyPrev = settlementByStrategyMap.get(batch.strategy) ?? {
+        strategy: batch.strategy,
+        count: 0,
+        distributableAmount: 0,
+        paidAmount: 0,
+        carryForwardAmount: 0
+      };
+      strategyPrev.count += 1;
+      strategyPrev.distributableAmount += Number(batch.distributableAmount.toString());
+      strategyPrev.paidAmount += Number(batch.paidAmount.toString());
+      strategyPrev.carryForwardAmount += Number(batch.carryForwardAmount.toString());
+      settlementByStrategyMap.set(batch.strategy, strategyPrev);
+
+      const dayKey = toDateKeyInChina(batch.settlementTime);
+      const dayPrev = settlementByDayMap.get(dayKey) ?? {
+        day: dayKey,
+        batchCount: 0,
+        distributableAmount: 0,
+        paidAmount: 0,
+        carryForwardAmount: 0
+      };
+      dayPrev.batchCount += 1;
+      dayPrev.distributableAmount += Number(batch.distributableAmount.toString());
+      dayPrev.paidAmount += Number(batch.paidAmount.toString());
+      dayPrev.carryForwardAmount += Number(batch.carryForwardAmount.toString());
+      settlementByDayMap.set(dayKey, dayPrev);
     }
 
     return reply.send({
@@ -368,7 +658,88 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
           count: item.count,
           amount: round2(item.amount)
         }))
-        .sort((left, right) => right.count - left.count)
+        .sort((left, right) => right.count - left.count),
+      byStatusDirection: [...statusDirectionAgg.values()]
+        .map((item) => ({
+          status: item.status,
+          direction: item.direction,
+          count: item.count,
+          amount: round2(item.amount)
+        }))
+        .sort((left, right) => right.count - left.count),
+      pendingAging: PENDING_AGING_BUCKETS.map((bucket) => {
+        const row = pendingAgingAgg.get(bucket.key);
+        return {
+          bucket: bucket.key,
+          label: bucket.label,
+          minDays: bucket.min,
+          maxDays: bucket.max,
+          count: row?.count ?? 0,
+          amount: round2(row?.amount ?? 0)
+        };
+      }),
+      byAccountCategory: [...accountCategoryAgg.values()]
+        .map((item) => ({
+          billAccount: item.billAccount,
+          category: item.category,
+          count: item.count,
+          incomeAmount: round2(item.income),
+          expenseAmount: round2(item.expense),
+          netAmount: round2(item.income - item.expense)
+        }))
+        .sort((left, right) => Math.abs(right.netAmount) - Math.abs(left.netAmount)),
+      bySourceType: [...sourceTypeAgg.values()]
+        .map((item) => ({
+          sourceType: item.sourceType,
+          count: item.count,
+          incomeAmount: round2(item.income),
+          expenseAmount: round2(item.expense),
+          netAmount: round2(item.income - item.expense)
+        }))
+        .sort((left, right) => right.count - left.count),
+      keyRatios: {
+        mainIncomeBase: round2(mainIncomeBase),
+        pureProfitSettled: round2(pureProfitSettled),
+        pureProfitWithPending: round2(pureProfitWithPending),
+        pendingIncomeRate: toPercent(mainPendingIncome, mainIncomeBase),
+        trafficCostRate: toPercent(trafficCost, mainIncomeBase),
+        platformCommissionRate: toPercent(platformCommission, mainIncomeBase),
+        closedAmountRate: toPercent(mainClosedAmount, mainIncomeBase),
+        refundAmountRate: toPercent(businessRefundExpense, mainIncomeBase),
+        pureProfitSettledRate: toPercent(pureProfitSettled, mainSettledIncome || 0),
+        pureProfitWithPendingRate: toPercent(pureProfitWithPending, mainIncomeBase)
+      },
+      byClosedRefundDay: [...closedRefundDayAgg.values()]
+        .map((item) => ({
+          day: item.day,
+          closedCount: item.closedCount,
+          refundCount: item.refundCount,
+          closedAmount: round2(item.closedAmount),
+          refundAmount: round2(item.refundAmount)
+        }))
+        .sort((left, right) => left.day.localeCompare(right.day)),
+      settlementOverview: {
+        totalBatches: settlementRows.length,
+        effectiveBatchNo,
+        byStrategy: [...settlementByStrategyMap.values()]
+          .map((item) => ({
+            strategy: item.strategy,
+            count: item.count,
+            distributableAmount: round2(item.distributableAmount),
+            paidAmount: round2(item.paidAmount),
+            carryForwardAmount: round2(item.carryForwardAmount)
+          }))
+          .sort((left, right) => right.count - left.count),
+        byDay: [...settlementByDayMap.values()]
+          .map((item) => ({
+            day: item.day,
+            batchCount: item.batchCount,
+            distributableAmount: round2(item.distributableAmount),
+            paidAmount: round2(item.paidAmount),
+            carryForwardAmount: round2(item.carryForwardAmount)
+          }))
+          .sort((left, right) => left.day.localeCompare(right.day))
+      }
     });
   });
 
