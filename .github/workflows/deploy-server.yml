@@ -15,7 +15,6 @@ jobs:
   deploy:
     name: SSH 部署
     runs-on: ubuntu-latest
-    if: ${{ secrets.DEPLOY_HOST != '' && secrets.DEPLOY_USER != '' && secrets.DEPLOY_SSH_KEY != '' && secrets.DEPLOY_PATH != '' }}
     env:
       IMAGE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.image_tag }}
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
@@ -23,10 +22,26 @@ jobs:
       DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT: ${{ secrets.DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT }}
       DEPLOY_WEB_PORT: ${{ secrets.DEPLOY_WEB_PORT }}
     steps:
+      - name: 检查部署凭据
+        id: gate
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          if [ -n "$DEPLOY_HOST" ] && [ -n "$DEPLOY_USER" ] && [ -n "$DEPLOY_SSH_KEY" ] && [ -n "$DEPLOY_PATH" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 检出代码
+        if: ${{ steps.gate.outputs.enabled == 'true' }}
         uses: actions/checkout@v4
 
       - name: 上传 Compose 文件到服务器
+        if: ${{ steps.gate.outputs.enabled == 'true' }}
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -37,6 +52,7 @@ jobs:
           strip_components: 1
 
       - name: 执行部署
+        if: ${{ steps.gate.outputs.enabled == 'true' }}
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -68,3 +84,7 @@ jobs:
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
             docker image prune -f
+
+      - name: 跳过说明
+        if: ${{ steps.gate.outputs.enabled != 'true' }}
+        run: echo "未配置完整部署 Secrets（DEPLOY_HOST/DEPLOY_USER/DEPLOY_SSH_KEY/DEPLOY_PATH），已跳过部署。"

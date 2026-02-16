@@ -68,7 +68,6 @@ jobs:
   publish-dockerhub:
     name: 发布 Docker Hub 镜像
     runs-on: ubuntu-latest
-    if: ${{ vars.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
     permissions:
       contents: read
     strategy:
@@ -88,16 +87,31 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 检查 Docker Hub 凭据
+        id: gate
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 设置 Docker Buildx
+        if: ${{ steps.gate.outputs.enabled == 'true' }}
         uses: docker/setup-buildx-action@v3
 
       - name: 登录 Docker Hub
+        if: ${{ steps.gate.outputs.enabled == 'true' }}
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: 提取 Docker 元数据
+        if: ${{ steps.gate.outputs.enabled == 'true' }}
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -110,6 +124,7 @@ jobs:
             type=sha
 
       - name: 构建并推送镜像
+        if: ${{ steps.gate.outputs.enabled == 'true' }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -121,3 +136,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: 跳过说明
+        if: ${{ steps.gate.outputs.enabled != 'true' }}
+        run: echo "未配置 vars.DOCKERHUB_USERNAME 或 secrets.DOCKERHUB_TOKEN，已跳过 Docker Hub 发布。"
