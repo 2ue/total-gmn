@@ -441,6 +441,19 @@ const API_BASE =
   (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_API_BASE ??
   "http://localhost:3001/api";
 
+function resolveDefaultSettlementCarryPercent(): string {
+  const raw = (import.meta as { env?: Record<string, string | undefined> }).env
+    ?.VITE_DEFAULT_SETTLEMENT_CARRY_PERCENT;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return "30";
+  }
+  const normalized = Math.max(0, Math.min(100, Math.trunc(parsed)));
+  return String(normalized);
+}
+
+const DEFAULT_SETTLEMENT_CARRY_PERCENT = resolveDefaultSettlementCarryPercent();
+
 const CATEGORY_LABEL: Record<Category, string> = {
   main_business: "主营",
   manual_add: "手动添加",
@@ -557,7 +570,9 @@ export default function App() {
   const [settlementDetailLoading, setSettlementDetailLoading] = useState(false);
   const [settlementError, setSettlementError] = useState("");
   const [settlementTime, setSettlementTime] = useState(() => toDateInputValue(new Date()));
-  const [settlementCarryPercent, setSettlementCarryPercent] = useState("20");
+  const [settlementCarryPercent, setSettlementCarryPercent] = useState(
+    DEFAULT_SETTLEMENT_CARRY_PERCENT
+  );
   const [settlementNote, setSettlementNote] = useState("");
   const [settlementPreview, setSettlementPreview] = useState<SettlementPreview | null>(null);
   const [settlementDetailBillAccount, setSettlementDetailBillAccount] = useState("");

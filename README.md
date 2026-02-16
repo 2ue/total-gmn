@@ -41,14 +41,21 @@ DATABASE_URL="file:./dev.db"
 PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT=true
 ```
 
-3. 初始化 Prisma Client 与数据库
+3. 配置 Web 环境变量（`apps/web/.env`，可选）
+
+```env
+VITE_API_BASE=http://localhost:3001/api
+VITE_DEFAULT_SETTLEMENT_CARRY_PERCENT=30
+```
+
+4. 初始化 Prisma Client 与数据库
 
 ```bash
 pnpm --filter @total-gmn/api prisma generate
 pnpm --filter @total-gmn/api prisma db push
 ```
 
-4. 启动前后端开发服务
+5. 启动前后端开发服务
 
 ```bash
 pnpm dev
