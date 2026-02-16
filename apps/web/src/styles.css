@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f5f7fb;
+  --panel: #ffffff;
+  --border: #d8e0ef;
+  --text: #1d2a44;
+  --muted: #56637d;
+  --brand: #1f6feb;
+  --brand-soft: #e5efff;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 8% 12%, #ecf3ff 0%, transparent 38%),
+    radial-gradient(circle at 92% 4%, #fff5df 0%, transparent 30%),
+    var(--bg);
+}
+
+#root {
+  min-height: 100vh;
+}

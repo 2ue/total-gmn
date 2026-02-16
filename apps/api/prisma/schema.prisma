@@ -1,0 +1,107 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ImportBatch {
+  id                    String                 @id @default(cuid())
+  sourceType            String
+  fileName              String
+  billAccount           String
+  importedAt            DateTime               @default(now())
+  rawMetaJson           Json
+  qualifiedTransactions QualifiedTransaction[]
+}
+
+model QualifiedTransaction {
+  id              String      @id @default(cuid())
+  batchId         String
+  batch           ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  dedupeKey       String      @unique
+  transactionTime DateTime
+  orderId         String
+  merchantOrderId String
+  description     String
+  direction       String
+  amount          Decimal
+  status          String
+  category        String
+  internalTransfer Boolean    @default(false)
+  billAccount     String
+  remark          String
+  rawRowJson      Json
+  incrementalSettledAt DateTime?
+  incrementalSettlementBatchId String?
+  createdAt       DateTime    @default(now())
+
+  @@index([transactionTime])
+  @@index([orderId])
+  @@index([category])
+  @@index([status])
+  @@index([incrementalSettledAt])
+  @@index([incrementalSettlementBatchId])
+}
+
+model SettlementBatch {
+  id                     String   @id @default(cuid())
+  batchNo                String   @unique
+  strategy               String   @default("cumulative")
+  billAccount            String   @default("")
+  settlementTime         DateTime
+  carryRatio             Decimal  @default(0)
+  periodNetAmount        Decimal  @default(0)
+  previousCarryForwardAmount Decimal @default(0)
+  cumulativeNetAmount    Decimal
+  settledBaseAmount      Decimal
+  distributableAmount    Decimal
+  paidAmount             Decimal
+  carryForwardAmount     Decimal
+  cumulativeSettledAmount Decimal
+  note                   String   @default("")
+  isEffective            Boolean  @default(false)
+  createdAt              DateTime @default(now())
+  settlementAllocations  SettlementAllocation[]
+
+  @@index([settlementTime])
+  @@index([isEffective])
+  @@index([strategy])
+  @@index([strategy, isEffective])
+  @@index([billAccount])
+  @@index([strategy, billAccount, isEffective])
+}
+
+model ProfitParticipant {
+  id                   String                @id @default(cuid())
+  name                 String
+  billAccount          String?               @unique
+  ratio                Decimal               @default(0)
+  note                 String                @default("")
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  settlementAllocations SettlementAllocation[]
+
+  @@index([name])
+}
+
+model SettlementAllocation {
+  id                    String            @id @default(cuid())
+  settlementBatchId     String
+  settlementBatch       SettlementBatch   @relation(fields: [settlementBatchId], references: [id], onDelete: Cascade)
+  participantId         String?
+  participant           ProfitParticipant? @relation(fields: [participantId], references: [id], onDelete: SetNull)
+  participantName       String
+  participantBillAccount String?
+  ratio                 Decimal
+  amount                Decimal
+  accountHeldAmount     Decimal           @default(0)
+  actualTransferAmount  Decimal           @default(0)
+  note                  String            @default("")
+  createdAt             DateTime          @default(now())
+
+  @@index([settlementBatchId])
+  @@index([participantId])
+}

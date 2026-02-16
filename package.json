@@ -1,0 +1,16 @@
+{
+  "name": "total-gmn",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "format": "pnpm -r format"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}
