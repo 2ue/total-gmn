@@ -20,6 +20,7 @@ jobs:
       DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
       DEPLOY_DATABASE_URL: ${{ secrets.DEPLOY_DATABASE_URL }}
       DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT: ${{ secrets.DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT }}
+      DEPLOY_API_PORT: ${{ secrets.DEPLOY_API_PORT }}
       DEPLOY_WEB_PORT: ${{ secrets.DEPLOY_WEB_PORT }}
     steps:
       - name: 检查部署凭据
@@ -59,7 +60,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script_stop: true
-          envs: IMAGE_TAG,DEPLOY_PATH,DEPLOY_DATABASE_URL,DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT,DEPLOY_WEB_PORT
+          envs: IMAGE_TAG,DEPLOY_PATH,DEPLOY_DATABASE_URL,DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT,DEPLOY_API_PORT,DEPLOY_WEB_PORT
           script: |
             set -e
             mkdir -p "$DEPLOY_PATH"
@@ -76,6 +77,9 @@ jobs:
             fi
             if [ -n "$DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT" ]; then
               export PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT="$DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT"
+            fi
+            if [ -n "$DEPLOY_API_PORT" ]; then
+              export API_PORT="$DEPLOY_API_PORT"
             fi
             if [ -n "$DEPLOY_WEB_PORT" ]; then
               export WEB_PORT="$DEPLOY_WEB_PORT"

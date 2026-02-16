@@ -30,6 +30,11 @@ docker compose up -d
 - Web: `http://localhost:8080`
 - API: `http://localhost:3001`
 
+可通过环境变量调整宿主机端口：
+
+- `WEB_PORT`（默认 `8080`）
+- `API_PORT`（默认 `3001`）
+
 ## 3. GitHub Actions 工作流
 
 已新增：
@@ -60,6 +65,7 @@ docker compose up -d
 - `secrets.DEPLOY_PATH`
 - `secrets.DEPLOY_DATABASE_URL`（可选）
 - `secrets.DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT`（可选）
+- `secrets.DEPLOY_API_PORT`（可选）
 - `secrets.DEPLOY_WEB_PORT`（可选）
 
 ## 5. 关于“能否完全移植 star-man 的工作流”
