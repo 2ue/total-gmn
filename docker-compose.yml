@@ -1,6 +1,6 @@
 services:
   api:
-    image: ghcr.io/2ue/total-gmn-api:${IMAGE_TAG:-latest}
+    image: huby11111/total-gmn-api:${IMAGE_TAG:-latest}
     container_name: total-gmn-api
     restart: unless-stopped
     env_file:
@@ -17,7 +17,7 @@ services:
       - "${API_PORT:-3901}:3001"
 
   web:
-    image: ghcr.io/2ue/total-gmn-web:${IMAGE_TAG:-latest}
+    image: huby11111/total-gmn-web:${IMAGE_TAG:-latest}
     container_name: total-gmn-web
     restart: unless-stopped
     env_file:

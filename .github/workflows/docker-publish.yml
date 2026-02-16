@@ -10,11 +10,13 @@ jobs:
   publish-ghcr:
     name: 发布 GHCR 镜像
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
       packages: write
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - component: api
@@ -61,13 +63,16 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ matrix.build_args }}
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=ghcr-${{ matrix.image_name }}
+          cache-to: type=gha,mode=min,scope=ghcr-${{ matrix.image_name }}
 
   publish-dockerhub:
     name: 发布 Docker Hub 镜像
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
     env:
@@ -75,6 +80,7 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - component: api
@@ -133,9 +139,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ matrix.build_args }}
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=dockerhub-${{ matrix.image_name }}
+          cache-to: type=gha,mode=min,scope=dockerhub-${{ matrix.image_name }}
 
       - name: 跳过说明
         if: ${{ steps.gate.outputs.enabled != 'true' }}
