@@ -10,6 +10,7 @@ const querySchema = z.object({
   start: z.string().optional(),
   end: z.string().optional(),
   billAccount: z.string().optional(),
+  orderId: z.string().optional(),
   category: z.string().optional(),
   status: z.string().optional(),
   direction: z.string().optional(),
@@ -22,6 +23,7 @@ const summaryQuerySchema = z.object({
   start: z.string().optional(),
   end: z.string().optional(),
   billAccount: z.string().optional(),
+  orderId: z.string().optional(),
   category: z.string().optional(),
   status: z.string().optional(),
   direction: z.string().optional(),
@@ -155,6 +157,7 @@ function buildTransactionWhere(input: {
   start?: string | undefined;
   end?: string | undefined;
   billAccount?: string | undefined;
+  orderId?: string | undefined;
   category?: string | undefined;
   status?: string | undefined;
   direction?: string | undefined;
@@ -180,6 +183,11 @@ function buildTransactionWhere(input: {
 
   if (input.billAccount) {
     where.billAccount = input.billAccount;
+  }
+  if (input.orderId?.trim()) {
+    where.orderId = {
+      contains: input.orderId.trim()
+    };
   }
 
   if (input.category) {

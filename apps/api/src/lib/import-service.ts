@@ -186,6 +186,27 @@ export function normalizeImportedTransactions(
   return changed ? normalized : transactions;
 }
 
+export function filterImportableTransactions(
+  sourceType: SourceType,
+  transactions: NormalizedTransaction[]
+): NormalizedTransaction[] {
+  if (sourceType !== ALIPAY_SOURCE_TYPE || transactions.length === 0) {
+    return transactions;
+  }
+
+  let changed = false;
+  const filtered = transactions.filter((record) => {
+    const normalizedStatus = record.status.trim();
+    if (PENDING_SHIPMENT_STATUSES.has(normalizedStatus)) {
+      changed = true;
+      return false;
+    }
+    return true;
+  });
+
+  return changed ? filtered : transactions;
+}
+
 async function persistQualifiedTransactions(input: PersistQualifiedInput): Promise<ImportReport> {
   const dedupedQualified = dedupeByDedupeKey(input.qualified);
   const categorySummary = buildCategorySummary(dedupedQualified.map((item) => item.record.category));
@@ -335,7 +356,8 @@ export async function importQualifiedTransactions(
 ): Promise<ImportReport> {
   const parsed = parseStatementFile(fileName, content);
   const normalizedTransactions = normalizeImportedTransactions(parsed.sourceType, parsed.transactions);
-  const qualified = classifyAndFilterTransactions(normalizedTransactions);
+  const importableTransactions = filterImportableTransactions(parsed.sourceType, normalizedTransactions);
+  const qualified = classifyAndFilterTransactions(importableTransactions);
   const qualifiedKeys = new Set(
     qualified.map((item) => toStableTransactionKey(item))
   );

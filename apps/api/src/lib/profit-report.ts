@@ -49,6 +49,7 @@ export interface ProfitSummaryNumbers {
   mainClosedAmount: number;
   mainClosedIncome: number;
   mainClosedExpense: number;
+  mainClosedNeutral: number;
   businessRefundExpense: number;
   pureProfitSettled: number;
   pureProfitWithPending: number;
@@ -61,6 +62,9 @@ export interface ProfitSummary extends Record<string, string> {
   trafficCost: string;
   platformCommission: string;
   mainClosedAmount: string;
+  mainClosedIncomeAmount: string;
+  mainClosedExpenseAmount: string;
+  mainClosedNeutralAmount: string;
   businessRefundExpense: string;
   pureProfitSettled: string;
   pureProfitWithPending: string;
@@ -91,6 +95,9 @@ export function formatProfitSummary(summary: ProfitSummaryNumbers): ProfitSummar
     trafficCost: formatAmount(summary.trafficCost),
     platformCommission: formatAmount(summary.platformCommission),
     mainClosedAmount: formatAmount(summary.mainClosedAmount),
+    mainClosedIncomeAmount: formatAmount(summary.mainClosedIncome),
+    mainClosedExpenseAmount: formatAmount(summary.mainClosedExpense),
+    mainClosedNeutralAmount: formatAmount(summary.mainClosedNeutral),
     businessRefundExpense: formatAmount(summary.businessRefundExpense),
     pureProfitSettled: formatAmount(summary.pureProfitSettled),
     pureProfitWithPending: formatAmount(summary.pureProfitWithPending)
@@ -204,6 +211,7 @@ export function computeProfitSummaryNumbers(records: ProfitRecord[]): ProfitSumm
     mainClosedAmount: 0,
     mainClosedIncome: 0,
     mainClosedExpense: 0,
+    mainClosedNeutral: 0,
     businessRefundExpense: 0,
     pureProfitSettled: 0,
     pureProfitWithPending: 0
@@ -245,6 +253,8 @@ export function computeProfitSummaryNumbers(records: ProfitRecord[]): ProfitSumm
         summary.mainClosedIncome += amount;
       } else if (record.direction === "expense") {
         summary.mainClosedExpense += amount;
+      } else {
+        summary.mainClosedNeutral += amount;
       }
       continue;
     }
@@ -262,6 +272,7 @@ export function computeProfitSummaryNumbers(records: ProfitRecord[]): ProfitSumm
   summary.mainClosedAmount = round2(summary.mainClosedAmount);
   summary.mainClosedIncome = round2(summary.mainClosedIncome);
   summary.mainClosedExpense = round2(summary.mainClosedExpense);
+  summary.mainClosedNeutral = round2(summary.mainClosedNeutral);
   summary.businessRefundExpense = round2(summary.businessRefundExpense);
 
   const closedNetContribution = shouldIncludeClosedDirectionInProfit()
@@ -338,6 +349,7 @@ export async function queryProfitSummaryNumbers(
     mainClosedAmount: 0,
     mainClosedIncome: 0,
     mainClosedExpense: 0,
+    mainClosedNeutral: 0,
     businessRefundExpense: 0,
     pureProfitSettled: 0,
     pureProfitWithPending: 0
@@ -378,6 +390,8 @@ export async function queryProfitSummaryNumbers(
         summary.mainClosedIncome += amount;
       } else if (row.direction === "expense") {
         summary.mainClosedExpense += amount;
+      } else {
+        summary.mainClosedNeutral += amount;
       }
       continue;
     }
@@ -395,6 +409,7 @@ export async function queryProfitSummaryNumbers(
   summary.mainClosedAmount = round2(summary.mainClosedAmount);
   summary.mainClosedIncome = round2(summary.mainClosedIncome);
   summary.mainClosedExpense = round2(summary.mainClosedExpense);
+  summary.mainClosedNeutral = round2(summary.mainClosedNeutral);
   summary.businessRefundExpense = round2(summary.businessRefundExpense);
 
   const closedNetContribution = shouldIncludeClosedDirectionInProfit()

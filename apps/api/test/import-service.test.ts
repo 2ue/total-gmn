@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NormalizedTransaction, parseChinaDateTime } from "@total-gmn/shared";
-import { normalizeImportedTransactions } from "../src/lib/import-service.js";
+import { filterImportableTransactions, normalizeImportedTransactions } from "../src/lib/import-service.js";
 
 function buildTx(partial: Partial<NormalizedTransaction>): NormalizedTransaction {
   return {
@@ -95,5 +95,38 @@ describe("normalizeImportedTransactions", () => {
     expect(output).toHaveLength(1);
     expect(output[0]?.status).toBe("等待发货");
     expect(output[0]?.direction).toBe("expense");
+  });
+});
+
+describe("filterImportableTransactions", () => {
+  it("skips waiting-shipment statuses when importing alipay statements", () => {
+    const input = [
+      buildTx({
+        status: "等待发货",
+        orderId: "o-waiting-shipment"
+      }),
+      buildTx({
+        status: "交易成功",
+        orderId: "o-success"
+      })
+    ];
+
+    const output = filterImportableTransactions("alipay_csv", input);
+    expect(output).toHaveLength(1);
+    expect(output[0]?.orderId).toBe("o-success");
+  });
+
+  it("keeps waiting-shipment statuses for non-alipay sources", () => {
+    const input = [
+      buildTx({
+        sourceType: "simple_csv",
+        status: "等待发货",
+        orderId: "o-simple-waiting-shipment"
+      })
+    ];
+
+    const output = filterImportableTransactions("simple_csv", input);
+    expect(output).toHaveLength(1);
+    expect(output[0]?.orderId).toBe("o-simple-waiting-shipment");
   });
 });

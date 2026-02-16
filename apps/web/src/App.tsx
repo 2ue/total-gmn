@@ -140,6 +140,7 @@ interface TransactionFilterInput {
   start: string;
   end: string;
   billAccount: string;
+  orderId: string;
   category: string;
   status: string;
   direction?: string;
@@ -301,6 +302,9 @@ interface ProfitSummary {
   trafficCost: string;
   platformCommission: string;
   mainClosedAmount: string;
+  mainClosedIncomeAmount: string;
+  mainClosedExpenseAmount: string;
+  mainClosedNeutralAmount: string;
   businessRefundExpense: string;
   pureProfitSettled: string;
   pureProfitWithPending: string;
@@ -525,6 +529,7 @@ export default function App() {
     start: "",
     end: "",
     billAccount: "",
+    orderId: "",
     category: "",
     status: "",
     pageSize: "50"
@@ -538,6 +543,7 @@ export default function App() {
     billAccount: ""
   });
   const [summary, setSummary] = useState<ProfitSummary | null>(null);
+  const [closedBreakdownOpen, setClosedBreakdownOpen] = useState(false);
   const [detailMetric, setDetailMetric] = useState<ProfitMetric>("main_settled_income");
   const [detailRows, setDetailRows] = useState<TransactionResponse | null>(null);
   const [reportDetailPage, setReportDetailPage] = useState(1);
@@ -979,13 +985,16 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
   const query = buildDateFilterQuery(reportFilterToDateRange(input.start, input.end));
   if (input.billAccount) {
     query.set("billAccount", input.billAccount);
-    }
-    if (input.category) {
-      query.set("category", input.category);
-    }
-    if (input.status) {
-      query.set("status", input.status);
-    }
+  }
+  if (input.orderId) {
+    query.set("orderId", input.orderId);
+  }
+  if (input.category) {
+    query.set("category", input.category);
+  }
+  if (input.status) {
+    query.set("status", input.status);
+  }
   if (input.direction) {
     query.set("direction", input.direction);
   }
@@ -1178,6 +1187,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
         start: filters.start,
         end: filters.end,
         billAccount: filters.billAccount,
+        orderId: filters.orderId,
         category: filters.category,
         status: filters.status
       };
@@ -1531,8 +1541,22 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
       throw new Error(body.message ?? "统计查询失败");
     }
 
-    const body = (await response.json()) as { summary: ProfitSummary };
-    return body.summary;
+    const body = (await response.json()) as { summary?: Partial<ProfitSummary> };
+    const summary = body.summary ?? {};
+    return {
+      mainSettledIncome: summary.mainSettledIncome ?? "0.00",
+      mainPendingIncome: summary.mainPendingIncome ?? "0.00",
+      mainExpense: summary.mainExpense ?? "0.00",
+      trafficCost: summary.trafficCost ?? "0.00",
+      platformCommission: summary.platformCommission ?? "0.00",
+      mainClosedAmount: summary.mainClosedAmount ?? "0.00",
+      mainClosedIncomeAmount: summary.mainClosedIncomeAmount ?? "0.00",
+      mainClosedExpenseAmount: summary.mainClosedExpenseAmount ?? "0.00",
+      mainClosedNeutralAmount: summary.mainClosedNeutralAmount ?? "0.00",
+      businessRefundExpense: summary.businessRefundExpense ?? "0.00",
+      pureProfitSettled: summary.pureProfitSettled ?? "0.00",
+      pureProfitWithPending: summary.pureProfitWithPending ?? "0.00"
+    };
   }
 
   async function queryProfitDetails(
@@ -2374,6 +2398,16 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
               />
             </label>
             <label className="grid gap-1 text-sm">
+              交易订单号
+              <input
+                type="text"
+                value={filters.orderId}
+                placeholder="支持模糊匹配"
+                className="rounded-lg border border-[var(--border)] px-3 py-2"
+                onChange={(event) => setFilters((prev) => ({ ...prev, orderId: event.target.value }))}
+              />
+            </label>
+            <label className="grid gap-1 text-sm">
               每页条数
               <select
                 value={filters.pageSize}
@@ -3047,10 +3081,61 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
               <MetricCard label="主营支出" value={summary.mainExpense} />
               <MetricCard label="流量消耗" value={summary.trafficCost} />
               <MetricCard label="平台抽成" value={summary.platformCommission} />
-              <MetricCard label="主营关闭交易金额" value={summary.mainClosedAmount} />
+              <MetricCard
+                label="主营关闭交易金额"
+                value={summary.mainClosedAmount}
+                hint="点击查看三部分构成"
+                onClick={() => setClosedBreakdownOpen(true)}
+              />
               <MetricCard label="主营退款支出" value={summary.businessRefundExpense} />
               <MetricCard label="纯收益（仅已到账）" value={summary.pureProfitSettled} />
               <MetricCard label="纯收益（含待到账）" value={summary.pureProfitWithPending} />
+            </div>
+          ) : null}
+
+          {summary && closedBreakdownOpen ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+              <button
+                type="button"
+                className="absolute inset-0 bg-black/35"
+                onClick={() => setClosedBreakdownOpen(false)}
+                aria-label="关闭弹层"
+              />
+              <div className="relative w-full max-w-3xl rounded-2xl border border-[var(--border)] bg-white p-5 shadow-xl">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-base font-semibold">主营关闭交易金额构成</h3>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm"
+                    onClick={() => setClosedBreakdownOpen(false)}
+                  >
+                    关闭
+                  </button>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <MetricCard label="关闭-收入金额" value={summary.mainClosedIncomeAmount} />
+                  <MetricCard label="关闭-支出金额" value={summary.mainClosedExpenseAmount} />
+                  <MetricCard label="关闭-不计收支金额" value={summary.mainClosedNeutralAmount} />
+                </div>
+                <div className="mt-4 rounded-xl border border-[var(--border)] bg-slate-50 p-4 text-sm text-slate-700">
+                  <p className="font-medium text-slate-900">计算口径</p>
+                  <p className="mt-2">
+                    1. 主营关闭交易金额 = 关闭-收入金额 + 关闭-支出金额 + 关闭-不计收支金额
+                  </p>
+                  <p>
+                    2. 三部分都以 <code>category=closed</code> 为前提，再按 <code>direction</code> 分组求和。
+                  </p>
+                  <p>
+                    3. 纯收益中的关闭贡献仅按 <code>关闭-收入金额 - 关闭-支出金额</code> 计算，
+                    <code>不计收支</code> 不参与纯收益加减。
+                  </p>
+                  <p className="mt-2 font-medium text-slate-900">
+                    当前关闭贡献：{formatSignedAmount(
+                      Number(summary.mainClosedIncomeAmount) - Number(summary.mainClosedExpenseAmount)
+                    )}
+                  </p>
+                </div>
+              </div>
             </div>
           ) : null}
 
@@ -4444,6 +4529,14 @@ function formatPercent(value: number): string {
   return fixed;
 }
 
+function formatSignedAmount(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "0.00";
+  }
+  const prefix = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${prefix}${Math.abs(value).toFixed(2)}`;
+}
+
 function createTempId(): string {
   return `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -4716,11 +4809,26 @@ function PieBreakdownChart(props: {
   );
 }
 
-function MetricCard(props: { label: string; value: string }) {
+function MetricCard(props: { label: string; value: string; hint?: string; onClick?: () => void }) {
+  if (props.onClick) {
+    return (
+      <button
+        type="button"
+        className="rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-left transition hover:border-slate-400"
+        onClick={props.onClick}
+      >
+        <p className="text-xs text-[var(--muted)]">{props.label}</p>
+        <p className="text-base font-semibold">{props.value}</p>
+        {props.hint ? <p className="mt-1 text-xs text-[var(--muted)]">{props.hint}</p> : null}
+      </button>
+    );
+  }
+
   return (
     <div className="rounded-lg border border-[var(--border)] bg-white px-3 py-2">
       <p className="text-xs text-[var(--muted)]">{props.label}</p>
       <p className="text-base font-semibold">{props.value}</p>
+      {props.hint ? <p className="mt-1 text-xs text-[var(--muted)]">{props.hint}</p> : null}
     </div>
   );
 }
