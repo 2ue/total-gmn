@@ -20,6 +20,9 @@ docker build -f apps/web/Dockerfile -t total-gmn-web:test --build-arg VITE_API_B
 ## 2. 本地容器启动
 
 ```bash
+# 先准备环境变量
+cp .env.example .env
+
 docker compose up -d
 # 如果你的 Docker 环境未启用 compose 子命令，可改用：
 # docker-compose up -d
@@ -34,6 +37,7 @@ docker compose up -d
 
 - `WEB_PORT`（默认 `8080`）
 - `API_PORT`（默认 `3001`）
+- `IMAGE_TAG`（默认 `latest`）
 
 ## 3. GitHub Actions 工作流
 

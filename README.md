@@ -73,23 +73,22 @@ pnpm --filter @total-gmn/web dev
 
 ## Docker 部署
 
-本项目使用双镜像部署（API + Web）：
+本项目默认使用远端镜像（API + Web）：
 
 ```bash
-# API
-docker build -f apps/api/Dockerfile -t total-gmn-api:test .
+# 1) 复制环境变量
+cp .env.example .env
 
-# Web
-docker build -f apps/web/Dockerfile -t total-gmn-web:test --build-arg VITE_API_BASE=/api .
-```
+# 2) 如 GHCR 镜像是私有仓库，先登录（公开仓库可跳过）
+# echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin
 
-通过 compose 运行：
-
-```bash
+# 3) 启动
 docker compose up -d
-# 如果你的环境没有 compose 子命令，可使用：
-# docker-compose up -d
 ```
+
+默认访问：
 
 - Web: `http://localhost:8080`
 - API: `http://localhost:3001`
+
+可在 `.env` 中修改 `IMAGE_TAG`、`WEB_PORT`、`API_PORT`。
