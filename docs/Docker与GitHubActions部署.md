@@ -49,7 +49,7 @@ docker compose up -d
 
 ### 4.1 Docker 发布
 
-- `vars.DOCKERHUB_USERNAME`（可选，不配则只发 GHCR）
+- `secrets.DOCKERHUB_USERNAME`（可选，不配则只发 GHCR）
 - `secrets.DOCKERHUB_TOKEN`（可选）
 
 ### 4.2 服务器部署
