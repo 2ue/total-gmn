@@ -3,25 +3,29 @@ services:
     image: ghcr.io/2ue/total-gmn-api:${IMAGE_TAG:-latest}
     container_name: total-gmn-api
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-file:/data/dev.db}
+      DATABASE_URL: ${DATABASE_URL:-file:/data/total-gmn/data.db}
       PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT: ${PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT:-true}
       PORT: 3001
       HOST: 0.0.0.0
     volumes:
-      - total_gmn_data:/data
+      - total_gmn_data:/data/total-gmn
       - total_gmn_storage:/app/apps/api/storage
     ports:
-      - "${API_PORT:-3001}:3001"
+      - "${API_PORT:-3901}:3001"
 
   web:
     image: ghcr.io/2ue/total-gmn-web:${IMAGE_TAG:-latest}
     container_name: total-gmn-web
     restart: unless-stopped
+    env_file:
+      - .env
     depends_on:
       - api
     ports:
-      - "${WEB_PORT:-8080}:80"
+      - "${WEB_PORT:-6853}:80"
 
 volumes:
   total_gmn_data:
