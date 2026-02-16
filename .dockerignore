@@ -1,0 +1,17 @@
+.git
+.github
+.history
+.codex
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+data
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal
+apps/api/prisma/*.db
+apps/api/prisma/*.db-*
+apps/api/reports
+apps/api/storage
+*.log

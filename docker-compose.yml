@@ -1,0 +1,36 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: total-gmn-api:local
+    container_name: total-gmn-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: file:/data/dev.db
+      PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT: "true"
+      PORT: 3001
+      HOST: 0.0.0.0
+    volumes:
+      - total_gmn_data:/data
+      - total_gmn_storage:/app/apps/api/storage
+    ports:
+      - "3001:3001"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE: /api
+    image: total-gmn-web:local
+    container_name: total-gmn-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  total_gmn_data:
+  total_gmn_storage:

@@ -1,0 +1,70 @@
+name: 部署到服务器
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "镜像标签（默认 latest）"
+        required: false
+        default: "latest"
+
+jobs:
+  deploy:
+    name: SSH 部署
+    runs-on: ubuntu-latest
+    if: ${{ secrets.DEPLOY_HOST != '' && secrets.DEPLOY_USER != '' && secrets.DEPLOY_SSH_KEY != '' && secrets.DEPLOY_PATH != '' }}
+    env:
+      IMAGE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.image_tag }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      DEPLOY_DATABASE_URL: ${{ secrets.DEPLOY_DATABASE_URL }}
+      DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT: ${{ secrets.DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT }}
+      DEPLOY_WEB_PORT: ${{ secrets.DEPLOY_WEB_PORT }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 上传 Compose 文件到服务器
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "deploy/docker-compose.prod.yml"
+          target: "${{ secrets.DEPLOY_PATH }}"
+          strip_components: 1
+
+      - name: 执行部署
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script_stop: true
+          envs: IMAGE_TAG,DEPLOY_PATH,DEPLOY_DATABASE_URL,DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT,DEPLOY_WEB_PORT
+          script: |
+            set -e
+            mkdir -p "$DEPLOY_PATH"
+            cd "$DEPLOY_PATH"
+
+            if [ ! -f docker-compose.prod.yml ]; then
+              echo "docker-compose.prod.yml 不存在"
+              exit 1
+            fi
+
+            export IMAGE_TAG="${IMAGE_TAG:-latest}"
+            if [ -n "$DEPLOY_DATABASE_URL" ]; then
+              export DATABASE_URL="$DEPLOY_DATABASE_URL"
+            fi
+            if [ -n "$DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT" ]; then
+              export PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT="$DEPLOY_PROFIT_INCLUDE_CLOSED_DIRECTION_IN_PROFIT"
+            fi
+            if [ -n "$DEPLOY_WEB_PORT" ]; then
+              export WEB_PORT="$DEPLOY_WEB_PORT"
+            fi
+
+            docker compose -f docker-compose.prod.yml pull
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker image prune -f
