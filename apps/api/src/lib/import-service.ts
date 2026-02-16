@@ -330,7 +330,8 @@ export interface ManualImportRowInput {
 
 export async function importQualifiedTransactions(
   fileName: string,
-  content: Buffer
+  content: Buffer,
+  extraRawMeta: Record<string, unknown> = {}
 ): Promise<ImportReport> {
   const parsed = parseStatementFile(fileName, content);
   const normalizedTransactions = normalizeImportedTransactions(parsed.sourceType, parsed.transactions);
@@ -351,7 +352,10 @@ export async function importQualifiedTransactions(
     fileName,
     billAccount: parsed.billAccount,
     totalParsed: normalizedTransactions.length,
-    rawMeta: parsed.rawMeta,
+    rawMeta: {
+      ...parsed.rawMeta,
+      ...extraRawMeta
+    },
     qualified,
     unqualifiedRows
   });
