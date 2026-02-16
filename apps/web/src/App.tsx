@@ -1479,7 +1479,7 @@ export default function App() {
           {importMode === "manual" ? (
             <form className="grid gap-4" onSubmit={handleManualRowsImport}>
               <p className="text-xs text-[var(--muted)]">
-                状态默认按 `交易成功` 处理，分类默认按 `手动添加` 处理。收支会根据金额正负自动判定。
+                状态默认按 `交易成功` 处理，分类默认按 `手动添加` 处理。仅批量解析时会根据金额正负自动判定收支，填充后金额统一为正数，表格内修改金额不会联动收支。
               </p>
               <div className="grid gap-3 rounded-xl border border-[var(--border)] bg-slate-50 p-3">
                 <label className="grid gap-2 text-sm font-medium">
@@ -1570,15 +1570,11 @@ export default function App() {
                             step="0.01"
                             value={row.amount}
                             className="w-full rounded-lg border border-[var(--border)] px-2 py-1.5"
-                            placeholder="例如 88.00 / -88.00"
+                            placeholder="例如 88.00"
                             onChange={(event) =>
                               updateManualImportRow(row.tempId, (current) => ({
                                 ...current,
-                                amount: event.target.value,
-                                direction:
-                                  current.direction === inferDirectionFromAmount(current.amount, current.direction)
-                                    ? inferDirectionFromAmount(event.target.value, current.direction)
-                                    : current.direction
+                                amount: normalizeManualAmountInput(event.target.value)
                               }))
                             }
                           />
@@ -3252,7 +3248,7 @@ function buildBulkParsedRow(
   return {
     direction: inferDirectionFromAmount(amountNumber),
     transactionTime,
-    amount: Number(amountNumber.toFixed(2)).toString(),
+    amount: Number(Math.abs(amountNumber).toFixed(2)).toString(),
     description,
     billAccount: (input.billAccount ?? "").trim() || defaultBillAccount
   };
@@ -3267,6 +3263,10 @@ function inferDirectionFromAmount(
     return fallback;
   }
   return numeric < 0 ? "expense" : "income";
+}
+
+function normalizeManualAmountInput(value: string): string {
+  return value.replace(/^-+/, "");
 }
 
 function reportFilterToDateRange(start: string, end: string): { start?: string; end?: string } {
