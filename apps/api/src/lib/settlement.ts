@@ -361,10 +361,6 @@ async function buildSettlementAllocations(
     participants.map((participant) => participant.ratio),
     batchAllocationBaseAmount
   );
-  const cumulativeHeldTargetsByRatio = buildAmountByRatio(
-    participants.map((participant) => participant.ratio),
-    cumulativeAllocationBaseAmount
-  );
   const accountContributionMap = await queryBoundAccountContributionMap(
     settlementTime,
     strategy,
@@ -374,17 +370,13 @@ async function buildSettlementAllocations(
   );
   const cumulativeHeldTargetsByAccount = buildAccountHeldMap(
     accountContributionMap,
-    cumulativeAllocationBaseAmount
+    batchAllocationBaseAmount
   );
-  const previousSums = await queryPreviousAllocationSumsByParticipant(strategy, billAccount, client);
 
   const allocations = participants.map((participant, index) => {
-    const participantKey = participant.id || `${participant.name}|${participant.billAccount || ""}`;
-    const previous = previousSums.get(participantKey) ?? { amount: 0, held: 0 };
     const amount = batchShouldAmounts[index] ?? 0;
     const participantBillAccount = participant.billAccount?.trim() ?? "";
-    const cumulativeHeldTarget = cumulativeHeldTargetsByAccount.get(participantBillAccount) ?? 0;
-    const accountHeldAmount = round2(cumulativeHeldTarget - previous.held);
+    const accountHeldAmount = cumulativeHeldTargetsByAccount.get(participantBillAccount) ?? 0;
     const actualTransferAmount = round2(amount - accountHeldAmount);
 
     return {
@@ -402,7 +394,6 @@ async function buildSettlementAllocations(
   const heldDelta = round2(
     batchAllocationBaseAmount - allocations.reduce((sum, item) => sum + item.accountHeldAmount, 0)
   );
-  // Only correct tiny rounding deltas; large delta can be expected when unbound participants exist.
   if (heldDelta !== 0 && Math.abs(heldDelta) <= 0.05) {
     const adjustIndex = pickAdjustIndexByAbsWeight(
       allocations.map((allocation) => allocation.accountHeldAmount)
@@ -816,25 +807,28 @@ async function buildSettlementPreview(
 
     const previousCumulativeNetAmount = round2(toNumber(effectiveBatch?.cumulativeNetAmount ?? DECIMAL_ZERO));
     const settledBaseAmount = round2(toNumber(effectiveBatch?.cumulativeSettledAmount ?? DECIMAL_ZERO));
+    const previousCarryForwardAmount = round2(toNumber(effectiveBatch?.carryForwardAmount ?? DECIMAL_ZERO));
     const cumulativeNetAmount = cumulative.periodNetAmount;
-    const previousCarryForwardAmount = round2(previousCumulativeNetAmount - settledBaseAmount);
-    const targets = calculateCumulativeSettlementTargets(cumulativeNetAmount, safeCarryRatio);
-    const distributableAmount = round2(cumulativeNetAmount - settledBaseAmount);
-    const paidAmount = round2(targets.cumulativeSettledAmount - settledBaseAmount);
+    const periodNetAmount = period.periodNetAmount;
+    const currentPeriodPaidAmount = round2(periodNetAmount * (1 - safeCarryRatio));
+    const carryForwardAmount = round2(periodNetAmount * safeCarryRatio);
+    const distributableAmount = round2(previousCarryForwardAmount + currentPeriodPaidAmount);
+    const paidAmount = distributableAmount;
+    const cumulativeSettledAmount = round2(settledBaseAmount + paidAmount);
 
     corePreview = {
       strategy,
       billAccount,
       settlementTime,
       carryRatio: safeCarryRatio,
-      periodNetAmount: period.periodNetAmount,
+      periodNetAmount,
       previousCarryForwardAmount,
       cumulativeNetAmount,
       settledBaseAmount,
       distributableAmount,
       paidAmount,
-      carryForwardAmount: targets.carryForwardAmount,
-      cumulativeSettledAmount: targets.cumulativeSettledAmount,
+      carryForwardAmount,
+      cumulativeSettledAmount,
       effectiveBatchId: effectiveBatch?.id ?? null,
       effectiveBatchNo: effectiveBatch?.batchNo ?? null
     };
@@ -868,24 +862,27 @@ async function buildSettlementPreview(
         closedNetContribution
     );
     const settledBaseAmount = round2(toNumber(effectiveBatch?.cumulativeSettledAmount ?? DECIMAL_ZERO));
-    const previousCarryForwardAmount = round2(previousCumulativeNetAmount - settledBaseAmount);
-    const targets = calculateCumulativeSettlementTargets(cumulativeNetAmount, safeCarryRatio);
-    const distributableAmount = round2(cumulativeNetAmount - settledBaseAmount);
-    const paidAmount = round2(targets.cumulativeSettledAmount - settledBaseAmount);
+    const previousCarryForwardAmount = round2(toNumber(effectiveBatch?.carryForwardAmount ?? DECIMAL_ZERO));
+    const periodNetAmount = round2(cumulativeNetAmount - previousCumulativeNetAmount);
+    const currentPeriodPaidAmount = round2(periodNetAmount * (1 - safeCarryRatio));
+    const carryForwardAmount = round2(periodNetAmount * safeCarryRatio);
+    const distributableAmount = round2(previousCarryForwardAmount + currentPeriodPaidAmount);
+    const paidAmount = distributableAmount;
+    const cumulativeSettledAmount = round2(settledBaseAmount + paidAmount);
 
     corePreview = {
       strategy,
       billAccount,
       settlementTime,
       carryRatio: safeCarryRatio,
-      periodNetAmount: round2(cumulativeNetAmount - previousCumulativeNetAmount),
+      periodNetAmount,
       previousCarryForwardAmount,
       cumulativeNetAmount,
       settledBaseAmount,
       distributableAmount,
       paidAmount,
-      carryForwardAmount: targets.carryForwardAmount,
-      cumulativeSettledAmount: targets.cumulativeSettledAmount,
+      carryForwardAmount,
+      cumulativeSettledAmount,
       effectiveBatchId: effectiveBatch?.id ?? null,
       effectiveBatchNo: effectiveBatch?.batchNo ?? null
     };
