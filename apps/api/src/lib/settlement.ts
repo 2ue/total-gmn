@@ -145,8 +145,8 @@ function calculateCumulativeSettlementTargets(cumulativeNetAmount: number, carry
 } {
   const safeCarryRatio = clampCarryRatio(carryRatio);
   const normalizedNetAmount = round2(Math.max(0, cumulativeNetAmount));
-  const cumulativeSettledAmount = round2(normalizedNetAmount * (1 - safeCarryRatio));
-  const carryForwardAmount = round2(Math.max(0, normalizedNetAmount - cumulativeSettledAmount));
+  const carryForwardAmount = round2(normalizedNetAmount * safeCarryRatio);
+  const cumulativeSettledAmount = round2(normalizedNetAmount - carryForwardAmount);
   return {
     cumulativeSettledAmount,
     carryForwardAmount
@@ -456,12 +456,11 @@ export function calculateSettlementAmounts(
   carryRatio = 0
 ): SettlementAmounts {
   const safeCarryRatio = clampCarryRatio(carryRatio);
-  const targets = calculateCumulativeSettlementTargets(cumulativeNetAmount, safeCarryRatio);
-  const rawDistributableAmount = round2(targets.cumulativeSettledAmount - settledBaseAmount);
-  const distributableAmount = rawDistributableAmount > 0 ? rawDistributableAmount : 0;
+  const distributableBaseAmount = round2(Math.max(0, cumulativeNetAmount - settledBaseAmount));
+  const distributableAmount = round2(distributableBaseAmount * (1 - safeCarryRatio));
   const paidAmount = distributableAmount;
+  const carryForwardAmount = round2(distributableBaseAmount - distributableAmount);
   const cumulativeSettledAmount = round2(settledBaseAmount + paidAmount);
-  const carryForwardAmount = round2(Math.max(0, cumulativeNetAmount - cumulativeSettledAmount));
 
   return {
     distributableAmount,
@@ -831,17 +830,14 @@ async function buildSettlementPreview(
 
     const previousCumulativeNetAmount = round2(toNumber(effectiveBatch?.cumulativeNetAmount ?? DECIMAL_ZERO));
     const settledBaseAmount = round2(toNumber(effectiveBatch?.cumulativeSettledAmount ?? DECIMAL_ZERO));
-    const previousCarryForwardAmount = round2(
-      Math.max(0, previousCumulativeNetAmount - settledBaseAmount)
-    );
+    const previousCarryForwardAmount = round2(Math.max(0, previousCumulativeNetAmount - settledBaseAmount));
     const cumulativeNetAmount = cumulative.periodNetAmount;
     const periodNetAmount = period.periodNetAmount;
-    const targets = calculateCumulativeSettlementTargets(cumulativeNetAmount, safeCarryRatio);
-    const rawDistributableAmount = round2(targets.cumulativeSettledAmount - settledBaseAmount);
-    const distributableAmount = rawDistributableAmount > 0 ? rawDistributableAmount : 0;
+    const distributableBaseAmount = round2(Math.max(0, cumulativeNetAmount - settledBaseAmount));
+    const distributableAmount = round2(distributableBaseAmount * (1 - safeCarryRatio));
     const paidAmount = distributableAmount;
     const cumulativeSettledAmount = round2(settledBaseAmount + paidAmount);
-    const carryForwardAmount = round2(Math.max(0, cumulativeNetAmount - cumulativeSettledAmount));
+    const carryForwardAmount = round2(distributableBaseAmount - distributableAmount);
 
     corePreview = {
       strategy,
@@ -889,16 +885,13 @@ async function buildSettlementPreview(
         closedNetContribution
     );
     const settledBaseAmount = round2(toNumber(effectiveBatch?.cumulativeSettledAmount ?? DECIMAL_ZERO));
-    const previousCarryForwardAmount = round2(
-      Math.max(0, previousCumulativeNetAmount - settledBaseAmount)
-    );
+    const previousCarryForwardAmount = round2(Math.max(0, previousCumulativeNetAmount - settledBaseAmount));
     const periodNetAmount = round2(cumulativeNetAmount - previousCumulativeNetAmount);
-    const targets = calculateCumulativeSettlementTargets(cumulativeNetAmount, safeCarryRatio);
-    const rawDistributableAmount = round2(targets.cumulativeSettledAmount - settledBaseAmount);
-    const distributableAmount = rawDistributableAmount > 0 ? rawDistributableAmount : 0;
+    const distributableBaseAmount = round2(Math.max(0, cumulativeNetAmount - settledBaseAmount));
+    const distributableAmount = round2(distributableBaseAmount * (1 - safeCarryRatio));
     const paidAmount = distributableAmount;
     const cumulativeSettledAmount = round2(settledBaseAmount + paidAmount);
-    const carryForwardAmount = round2(Math.max(0, cumulativeNetAmount - cumulativeSettledAmount));
+    const carryForwardAmount = round2(distributableBaseAmount - distributableAmount);
 
     corePreview = {
       strategy,

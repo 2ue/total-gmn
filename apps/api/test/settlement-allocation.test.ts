@@ -87,7 +87,7 @@ describe("settlement allocation account held", () => {
     expect(unbound?.actualTransferAmount).toBe(50);
   });
 
-  it("recomputes current target settled amount and subtracts settled base", async () => {
+  it("applies carry ratio to the current undistributed base", async () => {
     const allRows = [
       buildQualifiedRow({
         billAccount: "acc1@example.com",
@@ -143,14 +143,14 @@ describe("settlement allocation account held", () => {
       mockClient
     );
 
-    // current cumulative net=120; target settled=96; previous settled=70 => current paid=26, current carry=24
+    // current undistributed base = 120 - 70 = 50 => current paid=40, current carry=10
     expect(preview.previousCarryForwardAmount).toBe(30);
     expect(preview.periodNetAmount).toBe(20);
-    expect(preview.distributableAmount).toBe(26);
-    expect(preview.paidAmount).toBe(26);
-    expect(preview.carryForwardAmount).toBe(24);
-    expect(preview.cumulativeSettledAmount).toBe(96);
+    expect(preview.distributableAmount).toBe(40);
+    expect(preview.paidAmount).toBe(40);
+    expect(preview.carryForwardAmount).toBe(10);
+    expect(preview.cumulativeSettledAmount).toBe(110);
 
-    expect(preview.allocations.map((item) => item.amount)).toEqual([15.6, 10.4]);
+    expect(preview.allocations.map((item) => item.amount)).toEqual([24, 16]);
   });
 });

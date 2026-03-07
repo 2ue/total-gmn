@@ -29,13 +29,13 @@ describe("calculateSettlementAmounts", () => {
     expect(result.cumulativeSettledAmount).toBe(500.5);
   });
 
-  it("uses current target settled amount and subtracts settled base", () => {
+  it("applies carry ratio to the current undistributed base", () => {
     const result = calculateSettlementAmounts(1000, 500, 0.2);
 
-    expect(result.distributableAmount).toBe(300);
-    expect(result.paidAmount).toBe(300);
-    expect(result.carryForwardAmount).toBe(200);
-    expect(result.cumulativeSettledAmount).toBe(800);
+    expect(result.distributableAmount).toBe(400);
+    expect(result.paidAmount).toBe(400);
+    expect(result.carryForwardAmount).toBe(100);
+    expect(result.cumulativeSettledAmount).toBe(900);
   });
 
   it("clamps invalid carry ratio into safe range", () => {
