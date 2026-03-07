@@ -83,6 +83,14 @@ function decimalToNumber(value: ProfitRecord["amount"]): number {
   return Number(value.toString());
 }
 
+function accumulateDirectionalCost(total: number, direction: string, amount: number): number {
+  if (direction === "income") {
+    return total - amount;
+  }
+
+  return total + amount;
+}
+
 export function formatAmount(value: number): string {
   return value.toFixed(2);
 }
@@ -238,12 +246,16 @@ export function computeProfitSummaryNumbers(records: ProfitRecord[]): ProfitSumm
     }
 
     if (record.category === "traffic_cost") {
-      summary.trafficCost += amount;
+      summary.trafficCost = accumulateDirectionalCost(summary.trafficCost, record.direction, amount);
       continue;
     }
 
     if (record.category === "platform_commission") {
-      summary.platformCommission += amount;
+      summary.platformCommission = accumulateDirectionalCost(
+        summary.platformCommission,
+        record.direction,
+        amount
+      );
       continue;
     }
 
@@ -375,12 +387,16 @@ export async function queryProfitSummaryNumbers(
     }
 
     if (row.category === "traffic_cost") {
-      summary.trafficCost += amount;
+      summary.trafficCost = accumulateDirectionalCost(summary.trafficCost, row.direction, amount);
       continue;
     }
 
     if (row.category === "platform_commission") {
-      summary.platformCommission += amount;
+      summary.platformCommission = accumulateDirectionalCost(
+        summary.platformCommission,
+        row.direction,
+        amount
+      );
       continue;
     }
 

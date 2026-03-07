@@ -144,8 +144,9 @@ function calculateCumulativeSettlementTargets(cumulativeNetAmount: number, carry
   carryForwardAmount: number;
 } {
   const safeCarryRatio = clampCarryRatio(carryRatio);
-  const cumulativeSettledAmount = round2(cumulativeNetAmount * (1 - safeCarryRatio));
-  const carryForwardAmount = round2(cumulativeNetAmount - cumulativeSettledAmount);
+  const normalizedNetAmount = round2(Math.max(0, cumulativeNetAmount));
+  const cumulativeSettledAmount = round2(normalizedNetAmount * (1 - safeCarryRatio));
+  const carryForwardAmount = round2(Math.max(0, normalizedNetAmount - cumulativeSettledAmount));
   return {
     cumulativeSettledAmount,
     carryForwardAmount
@@ -223,6 +224,14 @@ function buildAmountByRatio(values: number[], baseAmount: number): number[] {
   }
 
   return roundedAmounts;
+}
+
+function accumulateDirectionalCost(total: number, direction: string, amount: number): number {
+  if (direction === "income") {
+    return round2(total - amount);
+  }
+
+  return round2(total + amount);
 }
 
 async function queryBoundAccountContributionMap(
@@ -370,13 +379,17 @@ async function buildSettlementAllocations(
   );
   const cumulativeHeldTargetsByAccount = buildAccountHeldMap(
     accountContributionMap,
-    batchAllocationBaseAmount
+    cumulativeAllocationBaseAmount
   );
+  const previousSums = await queryPreviousAllocationSumsByParticipant(strategy, billAccount, client);
 
   const allocations = participants.map((participant, index) => {
+    const participantKey = participant.id || `${participant.name}|${participant.billAccount || ""}`;
+    const previous = previousSums.get(participantKey) ?? { amount: 0, held: 0 };
     const amount = batchShouldAmounts[index] ?? 0;
     const participantBillAccount = participant.billAccount?.trim() ?? "";
-    const accountHeldAmount = cumulativeHeldTargetsByAccount.get(participantBillAccount) ?? 0;
+    const cumulativeHeldTarget = cumulativeHeldTargetsByAccount.get(participantBillAccount) ?? 0;
+    const accountHeldAmount = round2(cumulativeHeldTarget - previous.held);
     const actualTransferAmount = round2(amount - accountHeldAmount);
 
     return {
@@ -442,9 +455,20 @@ export function calculateSettlementAmounts(
   settledBaseAmount: number,
   carryRatio = 0
 ): SettlementAmounts {
-  const distributableAmount = round2(cumulativeNetAmount - settledBaseAmount);
   const safeCarryRatio = clampCarryRatio(carryRatio);
-  return calculatePayoutAmounts(distributableAmount, settledBaseAmount, safeCarryRatio);
+  const targets = calculateCumulativeSettlementTargets(cumulativeNetAmount, safeCarryRatio);
+  const rawDistributableAmount = round2(targets.cumulativeSettledAmount - settledBaseAmount);
+  const distributableAmount = rawDistributableAmount > 0 ? rawDistributableAmount : 0;
+  const paidAmount = distributableAmount;
+  const cumulativeSettledAmount = round2(settledBaseAmount + paidAmount);
+  const carryForwardAmount = round2(Math.max(0, cumulativeNetAmount - cumulativeSettledAmount));
+
+  return {
+    distributableAmount,
+    paidAmount,
+    carryForwardAmount,
+    cumulativeSettledAmount
+  };
 }
 
 function formatPreview(input: SettlementPreviewNumbers): SettlementPreview {
@@ -625,12 +649,12 @@ async function queryIncrementalNet(
         }
 
         if (row.category === "traffic_cost") {
-          trafficCost += amount;
+          trafficCost = accumulateDirectionalCost(trafficCost, row.direction, amount);
           continue;
         }
 
         if (row.category === "platform_commission") {
-          platformCommission += amount;
+          platformCommission = accumulateDirectionalCost(platformCommission, row.direction, amount);
           continue;
         }
 
@@ -688,12 +712,12 @@ async function queryIncrementalNet(
       }
 
       if (row.category === "traffic_cost") {
-        trafficCost += amount;
+        trafficCost = accumulateDirectionalCost(trafficCost, row.direction, amount);
         continue;
       }
 
       if (row.category === "platform_commission") {
-        platformCommission += amount;
+        platformCommission = accumulateDirectionalCost(platformCommission, row.direction, amount);
         continue;
       }
 
@@ -751,12 +775,12 @@ async function queryIncrementalNet(
     }
 
     if (row.category === "traffic_cost") {
-      trafficCost += amount;
+      trafficCost = accumulateDirectionalCost(trafficCost, row.direction, amount);
       continue;
     }
 
     if (row.category === "platform_commission") {
-      platformCommission += amount;
+      platformCommission = accumulateDirectionalCost(platformCommission, row.direction, amount);
       continue;
     }
 
@@ -807,14 +831,17 @@ async function buildSettlementPreview(
 
     const previousCumulativeNetAmount = round2(toNumber(effectiveBatch?.cumulativeNetAmount ?? DECIMAL_ZERO));
     const settledBaseAmount = round2(toNumber(effectiveBatch?.cumulativeSettledAmount ?? DECIMAL_ZERO));
-    const previousCarryForwardAmount = round2(toNumber(effectiveBatch?.carryForwardAmount ?? DECIMAL_ZERO));
+    const previousCarryForwardAmount = round2(
+      Math.max(0, previousCumulativeNetAmount - settledBaseAmount)
+    );
     const cumulativeNetAmount = cumulative.periodNetAmount;
     const periodNetAmount = period.periodNetAmount;
-    const currentPeriodPaidAmount = round2(periodNetAmount * (1 - safeCarryRatio));
-    const carryForwardAmount = round2(periodNetAmount * safeCarryRatio);
-    const distributableAmount = round2(previousCarryForwardAmount + currentPeriodPaidAmount);
+    const targets = calculateCumulativeSettlementTargets(cumulativeNetAmount, safeCarryRatio);
+    const rawDistributableAmount = round2(targets.cumulativeSettledAmount - settledBaseAmount);
+    const distributableAmount = rawDistributableAmount > 0 ? rawDistributableAmount : 0;
     const paidAmount = distributableAmount;
     const cumulativeSettledAmount = round2(settledBaseAmount + paidAmount);
+    const carryForwardAmount = round2(Math.max(0, cumulativeNetAmount - cumulativeSettledAmount));
 
     corePreview = {
       strategy,
@@ -862,13 +889,16 @@ async function buildSettlementPreview(
         closedNetContribution
     );
     const settledBaseAmount = round2(toNumber(effectiveBatch?.cumulativeSettledAmount ?? DECIMAL_ZERO));
-    const previousCarryForwardAmount = round2(toNumber(effectiveBatch?.carryForwardAmount ?? DECIMAL_ZERO));
+    const previousCarryForwardAmount = round2(
+      Math.max(0, previousCumulativeNetAmount - settledBaseAmount)
+    );
     const periodNetAmount = round2(cumulativeNetAmount - previousCumulativeNetAmount);
-    const currentPeriodPaidAmount = round2(periodNetAmount * (1 - safeCarryRatio));
-    const carryForwardAmount = round2(periodNetAmount * safeCarryRatio);
-    const distributableAmount = round2(previousCarryForwardAmount + currentPeriodPaidAmount);
+    const targets = calculateCumulativeSettlementTargets(cumulativeNetAmount, safeCarryRatio);
+    const rawDistributableAmount = round2(targets.cumulativeSettledAmount - settledBaseAmount);
+    const distributableAmount = rawDistributableAmount > 0 ? rawDistributableAmount : 0;
     const paidAmount = distributableAmount;
     const cumulativeSettledAmount = round2(settledBaseAmount + paidAmount);
+    const carryForwardAmount = round2(Math.max(0, cumulativeNetAmount - cumulativeSettledAmount));
 
     corePreview = {
       strategy,
