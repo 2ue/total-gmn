@@ -153,6 +153,14 @@ function toPercent(numerator: number, denominator: number): number {
   return round2((numerator / denominator) * 100);
 }
 
+function accumulateDirectionalCost(total: number, direction: string, amount: number): number {
+  if (direction === "income") {
+    return round2(total - amount);
+  }
+
+  return round2(total + amount);
+}
+
 function buildTransactionWhere(input: {
   start?: string | undefined;
   end?: string | undefined;
@@ -670,9 +678,9 @@ export async function registerTransactionRoutes(app: FastifyInstance): Promise<v
           mainExpense += amount;
         }
       } else if (categoryKey === "traffic_cost") {
-        trafficCost += amount;
+        trafficCost = accumulateDirectionalCost(trafficCost, directionKey, amount);
       } else if (categoryKey === "platform_commission") {
-        platformCommission += amount;
+        platformCommission = accumulateDirectionalCost(platformCommission, directionKey, amount);
       } else if (categoryKey === "closed") {
         mainClosedAmount += amount;
         if (directionKey === "income") {

@@ -7,6 +7,7 @@ const EXCLUDE_KEYWORDS = ["批量", "批发"];
 const TRAFFIC_KEYWORD = "闲鱼超级擦亮充值";
 const COMMISSION_KEYWORD = "分账-";
 const FISH_TRANSFER = "闲鱼转账";
+const ALIPAY_SYSTEM_ACCOUNT = "sys***@alipay.com";
 
 const QUALIFIED_CATEGORIES: ReadonlySet<Category> = new Set([
   "main_business",
@@ -82,9 +83,31 @@ function isMainBusinessDescription(description: string): boolean {
   return MAIN_KEYWORDS.some((keyword) => lowered.includes(keyword));
 }
 
+function isSmmMerchantOrderId(merchantOrderId: string): boolean {
+  const normalized = normalizeText(merchantOrderId).toUpperCase();
+  return normalized.startsWith("SMM");
+}
+
+function isAlipaySystemAccount(tx: NormalizedTransaction): boolean {
+  const counterparty = tx.rawRowJson["对方账号"];
+  return typeof counterparty === "string" && normalizeText(counterparty) === ALIPAY_SYSTEM_ACCOUNT;
+}
+
+function isMainBusinessTransaction(tx: NormalizedTransaction, description?: string): boolean {
+  if (isSmmMerchantOrderId(tx.merchantOrderId)) {
+    return true;
+  }
+
+  return isMainBusinessDescription(description ?? tx.description);
+}
+
 function classifySingle(tx: NormalizedTransaction): Category {
   const description = normalizeText(tx.description);
   const status = normalizeText(tx.status);
+
+  if (isAlipaySystemAccount(tx)) {
+    return "platform_commission";
+  }
 
   if (description.includes(TRAFFIC_KEYWORD)) {
     return "traffic_cost";
@@ -97,14 +120,14 @@ function classifySingle(tx: NormalizedTransaction): Category {
   const isRefund = status.includes("退款") || description.includes("退款");
   if (isRefund) {
     const refundBase = description.replace(/^退款-?/, "");
-    if (isMainBusinessDescription(refundBase)) {
+    if (isMainBusinessTransaction(tx, refundBase)) {
       return "business_refund_expense";
     }
 
     return "other_refund";
   }
 
-  const isMain = isMainBusinessDescription(description);
+  const isMain = isMainBusinessTransaction(tx, description);
   if (status === "交易关闭" && isMain) {
     return "closed";
   }

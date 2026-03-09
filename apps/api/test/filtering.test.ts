@@ -45,4 +45,63 @@ describe("classifyAndFilterTransactions", () => {
 
     expect(output.map((item) => item.orderId)).toEqual(["o2"]);
   });
+
+  it("classifies SMM merchant orders and sys account service fees into business categories", () => {
+    const input = [
+      makeTx({
+        orderId: "smm-success",
+        description: "订单9123645",
+        merchantOrderId: "SMMDLREA0CFFB3637164254058F2D3B8",
+        direction: "income",
+        status: "交易成功"
+      }),
+      makeTx({
+        orderId: "smm-closed",
+        description: "订单9017145",
+        merchantOrderId: "SMM1OUBZ3501B0531AD12DDE0BB8BE13",
+        direction: "neutral",
+        status: "交易关闭"
+      }),
+      makeTx({
+        orderId: "smm-refund",
+        description: "退款-订单9101955",
+        merchantOrderId: "SMMBN3S5U9EB970E8C90AB98A22350C4",
+        direction: "expense",
+        status: "退款成功"
+      }),
+      makeTx({
+        orderId: "sys-fee",
+        description: "服务费[2026030522001469111452688183]",
+        merchantOrderId: "2026030522001469111452688183",
+        direction: "expense",
+        status: "交易成功",
+        rawRowJson: {
+          对方账号: "sys***@alipay.com"
+        }
+      }),
+      makeTx({
+        orderId: "sys-fee-refund",
+        description: "服务费退回(2026030422001498321423143981)",
+        merchantOrderId: "2026030422001498321423143981-r-20260304155122UwYwy6eOL3-",
+        direction: "income",
+        status: "退费成功",
+        rawRowJson: {
+          对方账号: "sys***@alipay.com"
+        }
+      })
+    ];
+
+    const output = classifyAndFilterTransactions(input);
+
+    expect(output).toHaveLength(5);
+    expect(output.find((item) => item.orderId === "smm-success")?.category).toBe("main_business");
+    expect(output.find((item) => item.orderId === "smm-closed")?.category).toBe("closed");
+    expect(output.find((item) => item.orderId === "smm-refund")?.category).toBe(
+      "business_refund_expense"
+    );
+    expect(output.find((item) => item.orderId === "sys-fee")?.category).toBe("platform_commission");
+    expect(output.find((item) => item.orderId === "sys-fee-refund")?.category).toBe(
+      "platform_commission"
+    );
+  });
 });

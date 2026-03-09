@@ -22,6 +22,7 @@ const AUTO_PROMOTE_DAYS = 10;
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
 const SUCCESS_STATUS = "交易成功";
 const SUCCESS_DIRECTION: NormalizedTransaction["direction"] = "income";
+const IMPORT_TRANSACTION_TIMEOUT_MS = 120_000;
 
 function toStableKey(input: {
   transactionTime: Date;
@@ -211,115 +212,120 @@ async function persistQualifiedTransactions(input: PersistQualifiedInput): Promi
   const dedupedQualified = dedupeByDedupeKey(input.qualified);
   const categorySummary = buildCategorySummary(dedupedQualified.map((item) => item.record.category));
 
-  const batch = await prisma.$transaction(async (tx) => {
-    const createdBatch = await tx.importBatch.create({
-      data: {
-        sourceType: input.sourceType,
-        fileName: input.fileName,
-        billAccount: input.billAccount,
-        rawMetaJson: toPrismaJson({
-          ...input.rawMeta,
-          totalParsed: input.totalParsed,
-          qualifiedCount: dedupedQualified.length,
-          unqualifiedCount: input.unqualifiedRows.length,
-          unqualifiedRows: input.unqualifiedRows
-        })
-      }
-    });
-
-    if (dedupedQualified.length > 0) {
-      const dedupeKeys = dedupedQualified.map((item) => item.dedupeKey);
-
-      const existing = await tx.qualifiedTransaction.findMany({
-        where: {
-          dedupeKey: {
-            in: dedupeKeys
-          }
-        },
-        select: {
-          id: true,
-          dedupeKey: true,
-          transactionTime: true
+  const batch = await prisma.$transaction(
+    async (tx) => {
+      const createdBatch = await tx.importBatch.create({
+        data: {
+          sourceType: input.sourceType,
+          fileName: input.fileName,
+          billAccount: input.billAccount,
+          rawMetaJson: toPrismaJson({
+            ...input.rawMeta,
+            totalParsed: input.totalParsed,
+            qualifiedCount: dedupedQualified.length,
+            unqualifiedCount: input.unqualifiedRows.length,
+            unqualifiedRows: input.unqualifiedRows
+          })
         }
       });
 
-      const existingByKey = new Map(existing.map((item) => [item.dedupeKey, item]));
+      if (dedupedQualified.length > 0) {
+        const dedupeKeys = dedupedQualified.map((item) => item.dedupeKey);
 
-      const createData: Prisma.QualifiedTransactionCreateManyInput[] = [];
-      const updateData: Array<{
-        id: string;
-        dedupeKey: string;
-        record: ClassifiedTransaction;
-      }> = [];
-
-      for (const item of dedupedQualified) {
-        const existingRecord = existingByKey.get(item.dedupeKey);
-        if (!existingRecord) {
-          createData.push({
-            batchId: createdBatch.id,
-            dedupeKey: item.dedupeKey,
-            transactionTime: item.record.transactionTime,
-            orderId: item.record.orderId,
-            merchantOrderId: item.record.merchantOrderId,
-            description: item.record.description,
-            direction: item.record.direction,
-            amount: item.record.amount,
-            status: item.record.status,
-            category: item.record.category,
-            internalTransfer: item.record.internalTransfer,
-            billAccount: item.record.billAccount,
-            remark: item.record.remark,
-            rawRowJson: toPrismaJson(item.record.rawRowJson)
-          });
-          continue;
-        }
-
-        if (existingRecord.transactionTime.getTime() <= item.record.transactionTime.getTime()) {
-          updateData.push({
-            id: existingRecord.id,
-            dedupeKey: item.dedupeKey,
-            record: item.record
-          });
-        }
-      }
-
-      if (createData.length > 0) {
-        await tx.qualifiedTransaction.createMany({
-          data: createData
+        const existing = await tx.qualifiedTransaction.findMany({
+          where: {
+            dedupeKey: {
+              in: dedupeKeys
+            }
+          },
+          select: {
+            id: true,
+            dedupeKey: true,
+            transactionTime: true
+          }
         });
+
+        const existingByKey = new Map(existing.map((item) => [item.dedupeKey, item]));
+
+        const createData: Prisma.QualifiedTransactionCreateManyInput[] = [];
+        const updateData: Array<{
+          id: string;
+          dedupeKey: string;
+          record: ClassifiedTransaction;
+        }> = [];
+
+        for (const item of dedupedQualified) {
+          const existingRecord = existingByKey.get(item.dedupeKey);
+          if (!existingRecord) {
+            createData.push({
+              batchId: createdBatch.id,
+              dedupeKey: item.dedupeKey,
+              transactionTime: item.record.transactionTime,
+              orderId: item.record.orderId,
+              merchantOrderId: item.record.merchantOrderId,
+              description: item.record.description,
+              direction: item.record.direction,
+              amount: item.record.amount,
+              status: item.record.status,
+              category: item.record.category,
+              internalTransfer: item.record.internalTransfer,
+              billAccount: item.record.billAccount,
+              remark: item.record.remark,
+              rawRowJson: toPrismaJson(item.record.rawRowJson)
+            });
+            continue;
+          }
+
+          if (existingRecord.transactionTime.getTime() <= item.record.transactionTime.getTime()) {
+            updateData.push({
+              id: existingRecord.id,
+              dedupeKey: item.dedupeKey,
+              record: item.record
+            });
+          }
+        }
+
+        if (createData.length > 0) {
+          await tx.qualifiedTransaction.createMany({
+            data: createData
+          });
+        }
+
+        if (updateData.length > 0) {
+          await Promise.all(
+            updateData.map((item) =>
+              tx.qualifiedTransaction.update({
+                where: {
+                  id: item.id
+                },
+                data: {
+                  batchId: createdBatch.id,
+                  transactionTime: item.record.transactionTime,
+                  orderId: item.record.orderId,
+                  merchantOrderId: item.record.merchantOrderId,
+                  description: item.record.description,
+                  direction: item.record.direction,
+                  amount: item.record.amount,
+                  status: item.record.status,
+                  category: item.record.category,
+                  internalTransfer: item.record.internalTransfer,
+                  billAccount: item.record.billAccount,
+                  remark: item.record.remark,
+                  rawRowJson: toPrismaJson(item.record.rawRowJson),
+                  dedupeKey: item.dedupeKey
+                }
+              })
+            )
+          );
+        }
       }
 
-      if (updateData.length > 0) {
-        await Promise.all(
-          updateData.map((item) =>
-            tx.qualifiedTransaction.update({
-              where: {
-                id: item.id
-              },
-              data: {
-                batchId: createdBatch.id,
-                transactionTime: item.record.transactionTime,
-                orderId: item.record.orderId,
-                merchantOrderId: item.record.merchantOrderId,
-                description: item.record.description,
-                direction: item.record.direction,
-                amount: item.record.amount,
-                status: item.record.status,
-                category: item.record.category,
-                internalTransfer: item.record.internalTransfer,
-                billAccount: item.record.billAccount,
-                remark: item.record.remark,
-                rawRowJson: toPrismaJson(item.record.rawRowJson),
-                dedupeKey: item.dedupeKey
-              }
-            })
-          )
-        );
-      }
+      return createdBatch;
+    },
+    {
+      timeout: IMPORT_TRANSACTION_TIMEOUT_MS
     }
-
-    return createdBatch;
-  });
+  );
 
   return {
     batchId: batch.id,

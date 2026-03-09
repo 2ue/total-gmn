@@ -23,16 +23,16 @@ describe("calculateSettlementAmounts", () => {
   it("carries forward deficit when distributable is negative", () => {
     const result = calculateSettlementAmounts(300, 500.5);
 
-    expect(result.distributableAmount).toBe(-200.5);
+    expect(result.distributableAmount).toBe(0);
     expect(result.paidAmount).toBe(0);
-    expect(result.carryForwardAmount).toBe(200.5);
+    expect(result.carryForwardAmount).toBe(0);
     expect(result.cumulativeSettledAmount).toBe(500.5);
   });
 
-  it("reserves part of positive distributable amount by carry ratio", () => {
+  it("applies carry ratio to the current undistributed base", () => {
     const result = calculateSettlementAmounts(1000, 500, 0.2);
 
-    expect(result.distributableAmount).toBe(500);
+    expect(result.distributableAmount).toBe(400);
     expect(result.paidAmount).toBe(400);
     expect(result.carryForwardAmount).toBe(100);
     expect(result.cumulativeSettledAmount).toBe(900);
@@ -41,7 +41,7 @@ describe("calculateSettlementAmounts", () => {
   it("clamps invalid carry ratio into safe range", () => {
     const result = calculateSettlementAmounts(1000, 500, 2);
 
-    expect(result.distributableAmount).toBe(500);
+    expect(result.distributableAmount).toBe(0);
     expect(result.paidAmount).toBe(0);
     expect(result.carryForwardAmount).toBe(500);
     expect(result.cumulativeSettledAmount).toBe(500);
