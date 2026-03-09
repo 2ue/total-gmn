@@ -17,3 +17,4 @@ dist
 build
 data
 .history
+.claude/settings.local.json

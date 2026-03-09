@@ -67,12 +67,20 @@ describe("settlement allocation account held", () => {
 
     const mockClient = {
       qualifiedTransaction: {
-        findMany: async (args: { where?: { billAccount?: string } }) => {
-          const account = args.where?.billAccount?.trim();
-          if (!account) {
-            return allRows;
-          }
-          return allRows.filter((item) => item.billAccount === account);
+        findMany: async (args: { where?: Record<string, unknown> }) => {
+          const where = args.where ?? {};
+          const account = (where.billAccount as string)?.trim?.();
+          const catFilter = where.category;
+          const dirFilter = where.direction as string | undefined;
+          return allRows.filter((row) => {
+            if (account && row.billAccount !== account) return false;
+            if (typeof catFilter === "string" && row.category !== catFilter) return false;
+            if (catFilter && typeof catFilter === "object" && "in" in catFilter) {
+              if (!(catFilter as { in: string[] }).in.includes(row.category)) return false;
+            }
+            if (dirFilter && row.direction !== dirFilter) return false;
+            return true;
+          });
         }
       },
       settlementBatch: {
@@ -134,7 +142,19 @@ describe("settlement allocation account held", () => {
 
     const mockClient = {
       qualifiedTransaction: {
-        findMany: async () => allRows
+        findMany: async (args: { where?: Record<string, unknown> }) => {
+          const where = args.where ?? {};
+          const catFilter = where.category;
+          const dirFilter = where.direction as string | undefined;
+          return allRows.filter((row) => {
+            if (typeof catFilter === "string" && row.category !== catFilter) return false;
+            if (catFilter && typeof catFilter === "object" && "in" in catFilter) {
+              if (!(catFilter as { in: string[] }).in.includes(row.category)) return false;
+            }
+            if (dirFilter && row.direction !== dirFilter) return false;
+            return true;
+          });
+        }
       },
       settlementBatch: {
         findFirst: async () => ({
@@ -193,12 +213,14 @@ describe("settlement allocation account held", () => {
     expect(preview.allocations.map((item) => item.expenseCompensation)).toEqual([0, 0]);
   });
 
-  it("compensates shareholder expenses before distributing profit", async () => {
-    // Scenario: acc1 has income 300, expenses: mainExpense=50, trafficCost=20 => total expense=70
-    // acc2 has income 200, expenses: trafficCost=30 => total expense=30
-    // Total net = (300-50-20) + (200-30) = 230+170 = 400
-    // But we query all accounts without billAccount filter => net=500-100=400
-    const allIncomeRows = [
+  it("compensates only manual_add expenses before distributing profit", async () => {
+    // Scenario:
+    // acc1: income 300 (main_business), manual_add expense 70, traffic_cost 20
+    // acc2: income 200 (main_business), manual_add expense 30, traffic_cost 10
+    // Net = (300+200) - (70+30) - (20+10) = 500-100-30 = 370
+    // Only manual_add expenses count for shareholder compensation:
+    //   acc1 manual expense = 70, acc2 manual expense = 30 => totalShareholderExpenses = 100
+    const allRows = [
       buildQualifiedRow({
         billAccount: "acc1@example.com",
         amount: "300.00",
@@ -216,12 +238,22 @@ describe("settlement allocation account held", () => {
       {
         ...buildQualifiedRow({
           billAccount: "acc1@example.com",
-          amount: "50.00",
+          amount: "70.00",
           direction: "expense",
           status: "交易成功",
-          category: "main_business"
+          category: "manual_add"
         }),
-        id: "tx-acc1-exp-50"
+        id: "tx-acc1-manual-exp-70"
+      },
+      {
+        ...buildQualifiedRow({
+          billAccount: "acc2@example.com",
+          amount: "30.00",
+          direction: "expense",
+          status: "交易成功",
+          category: "manual_add"
+        }),
+        id: "tx-acc2-manual-exp-30"
       },
       {
         ...buildQualifiedRow({
@@ -236,23 +268,32 @@ describe("settlement allocation account held", () => {
       {
         ...buildQualifiedRow({
           billAccount: "acc2@example.com",
-          amount: "30.00",
+          amount: "10.00",
           direction: "expense",
           status: "交易成功",
           category: "traffic_cost"
         }),
-        id: "tx-acc2-traffic-30"
+        id: "tx-acc2-traffic-10"
       }
     ];
 
     const mockClient = {
       qualifiedTransaction: {
-        findMany: async (args: { where?: { billAccount?: string } }) => {
-          const account = args.where?.billAccount?.trim();
-          if (!account) {
-            return allIncomeRows;
-          }
-          return allIncomeRows.filter((item) => item.billAccount === account);
+        findMany: async (args: { where?: Record<string, unknown> }) => {
+          const where = args.where ?? {};
+          const account = (where.billAccount as string)?.trim?.();
+          const catFilter = where.category;
+          const dirFilter = where.direction as string | undefined;
+          // Filter by all where conditions to support both contribution and expense queries
+          return allRows.filter((row) => {
+            if (account && row.billAccount !== account) return false;
+            if (typeof catFilter === "string" && row.category !== catFilter) return false;
+            if (catFilter && typeof catFilter === "object" && "in" in catFilter) {
+              if (!(catFilter as { in: string[] }).in.includes(row.category)) return false;
+            }
+            if (dirFilter && row.direction !== dirFilter) return false;
+            return true;
+          });
         }
       },
       settlementBatch: {
@@ -289,30 +330,30 @@ describe("settlement allocation account held", () => {
       mockClient
     );
 
-    // cumulativeNetAmount = 300+200-50-20-30 = 400, periodNet=400
-    // totalAvailable = 0 + 400 = 400
-    // totalShareholderExpenses = 70 (acc1) + 30 (acc2) = 100
-    // pureProfit = 400 - 100 = 300
-    // carry = 300 * 0.3 = 90
-    // profitPool = 300 - 90 = 210
-    // paidAmount = 100 + 210 = 310
+    // cumulativeNetAmount = 300+200 - 70-30 - 20-10 = 370, periodNet=370
+    // totalAvailable = 0 + 370 = 370
+    // totalShareholderExpenses = 70 + 30 = 100 (only manual_add expenses)
+    // pureProfit = 370 - 100 = 270
+    // carry = 270 * 0.3 = 81
+    // profitPool = 270 - 81 = 189
+    // paidAmount = 100 + 189 = 289
     expect(preview.totalShareholderExpenses).toBe(100);
-    expect(preview.profitPoolAmount).toBe(210);
-    expect(preview.carryForwardAmount).toBe(90);
-    expect(preview.paidAmount).toBe(310);
+    expect(preview.profitPoolAmount).toBe(189);
+    expect(preview.carryForwardAmount).toBe(81);
+    expect(preview.paidAmount).toBe(289);
 
     // Allocation:
-    // p-owner1: expenseComp=70, profitShare=210*0.5=105, amount=175
-    // p-owner2: expenseComp=30, profitShare=210*0.5=105, amount=135
+    // p-owner1: expenseComp=70, profitShare=189*0.5=94.5, amount=164.5
+    // p-owner2: expenseComp=30, profitShare=189*0.5=94.5, amount=124.5
     const owner1 = preview.allocations.find((item) => item.participantId === "p-owner1")!;
     const owner2 = preview.allocations.find((item) => item.participantId === "p-owner2")!;
 
     expect(owner1.expenseCompensation).toBe(70);
-    expect(owner1.amount).toBe(175);
+    expect(owner1.amount).toBe(164.5);
     expect(owner2.expenseCompensation).toBe(30);
-    expect(owner2.amount).toBe(135);
+    expect(owner2.amount).toBe(124.5);
 
     // Total conservation: paidAmount + carryForward = totalAvailable
-    expect(preview.paidAmount + preview.carryForwardAmount).toBe(400);
+    expect(preview.paidAmount + preview.carryForwardAmount).toBe(370);
   });
 });

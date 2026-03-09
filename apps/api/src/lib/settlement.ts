@@ -288,9 +288,9 @@ async function queryBoundAccountContributionMap(
 
 async function queryBoundAccountExpenseMap(
   settlementTime: Date,
-  strategy: SettlementStrategy,
+  _strategy: SettlementStrategy,
   participants: ParticipantRow[],
-  includeClosedDirectionInProfit: boolean,
+  _includeClosedDirectionInProfit: boolean,
   client: SettlementClient
 ): Promise<Map<string, number>> {
   const boundAccounts = [
@@ -304,41 +304,21 @@ async function queryBoundAccountExpenseMap(
     return new Map<string, number>();
   }
 
+  // Only manual_add expenses count as shareholder expenses eligible for compensation
   const accountRows = await Promise.all(
     boundAccounts.map(async (account) => {
-      if (strategy === "incremental") {
-        const cumulative = await queryIncrementalNet(
-          settlementTime,
-          account,
-          false,
-          includeClosedDirectionInProfit,
-          client
-        );
-        // For incremental, we need to query expenses separately via profitSummary
-        const summary = await queryProfitSummaryNumbers(
-          { end: settlementTime, billAccount: account },
-          client
-        );
-        const expenseTotal = round2(
-          summary.mainExpense +
-            summary.trafficCost +
-            summary.platformCommission +
-            summary.businessRefundExpense +
-            (includeClosedDirectionInProfit ? summary.mainClosedExpense : 0)
-        );
-        return [account, expenseTotal] as const;
-      }
-
-      const summary = await queryProfitSummaryNumbers(
-        { end: settlementTime, billAccount: account },
-        client
-      );
+      const rows = await client.qualifiedTransaction.findMany({
+        where: {
+          transactionTime: { lte: settlementTime },
+          billAccount: account,
+          internalTransfer: false,
+          category: "manual_add",
+          direction: "expense"
+        },
+        select: { amount: true }
+      });
       const expenseTotal = round2(
-        summary.mainExpense +
-          summary.trafficCost +
-          summary.platformCommission +
-          summary.businessRefundExpense +
-          (includeClosedDirectionInProfit ? summary.mainClosedExpense : 0)
+        rows.reduce((sum, row) => sum + toNumber(row.amount), 0)
       );
       return [account, expenseTotal] as const;
     })
