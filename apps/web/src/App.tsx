@@ -316,6 +316,7 @@ interface SettlementAllocation {
   participantBillAccount: string | null;
   ratioPercent: string;
   amount: string;
+  expenseCompensation: string;
   accountHeldAmount: string;
   actualTransferAmount: string;
   note: string;
@@ -327,6 +328,7 @@ interface SettlementAllocationResponse {
   participantBillAccount?: string | null;
   ratio?: string;
   amount?: string;
+  expenseCompensation?: string;
   accountHeldAmount?: string;
   actualTransferAmount?: string;
   note?: string;
@@ -341,6 +343,8 @@ interface SettlementPreview {
   previousCarryForwardAmount: string;
   cumulativeNetAmount: string;
   settledBaseAmount: string;
+  totalShareholderExpenses: string;
+  profitPoolAmount: string;
   distributableAmount: string;
   paidAmount: string;
   carryForwardAmount: string;
@@ -369,6 +373,8 @@ interface SettlementBatch {
   previousCarryForwardAmount: string;
   cumulativeNetAmount: string;
   settledBaseAmount: string;
+  totalShareholderExpenses: string;
+  profitPoolAmount: string;
   distributableAmount: string;
   paidAmount: string;
   carryForwardAmount: string;
@@ -1675,6 +1681,8 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
       body.previousCarryForwardAmount === undefined ||
       body.cumulativeNetAmount === undefined ||
       body.settledBaseAmount === undefined ||
+      body.totalShareholderExpenses === undefined ||
+      body.profitPoolAmount === undefined ||
       body.distributableAmount === undefined ||
       body.paidAmount === undefined ||
       body.carryForwardAmount === undefined ||
@@ -1694,6 +1702,8 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
       previousCarryForwardAmount: body.previousCarryForwardAmount!,
       cumulativeNetAmount: body.cumulativeNetAmount!,
       settledBaseAmount: body.settledBaseAmount!,
+      totalShareholderExpenses: body.totalShareholderExpenses!,
+      profitPoolAmount: body.profitPoolAmount!,
       distributableAmount: body.distributableAmount!,
       paidAmount: body.paidAmount!,
       carryForwardAmount: body.carryForwardAmount!,
@@ -1707,6 +1717,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
         participantBillAccount: item.participantBillAccount ?? null,
         ratioPercent: `${ratioTextToPercentText(item.ratio)}%`,
         amount: item.amount ?? "0.00",
+        expenseCompensation: item.expenseCompensation ?? "0.00",
         accountHeldAmount: item.accountHeldAmount ?? "0.00",
         actualTransferAmount: item.actualTransferAmount ?? "0.00",
         note: item.note ?? ""
@@ -1742,6 +1753,8 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
       previousCarryForwardAmount: item.previousCarryForwardAmount ?? "0.00",
       cumulativeNetAmount: item.cumulativeNetAmount ?? "0.00",
       settledBaseAmount: item.settledBaseAmount ?? "0.00",
+      totalShareholderExpenses: item.totalShareholderExpenses ?? "0.00",
+      profitPoolAmount: item.profitPoolAmount ?? "0.00",
       distributableAmount: item.distributableAmount ?? "0.00",
       paidAmount: item.paidAmount ?? "0.00",
       carryForwardAmount: item.carryForwardAmount ?? "0.00",
@@ -1755,6 +1768,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
         participantBillAccount: allocation.participantBillAccount ?? null,
         ratioPercent: `${ratioTextToPercentText(allocation.ratio)}%`,
         amount: allocation.amount ?? "0.00",
+        expenseCompensation: allocation.expenseCompensation ?? "0.00",
         accountHeldAmount: allocation.accountHeldAmount ?? "0.00",
         actualTransferAmount: allocation.actualTransferAmount ?? "0.00",
         note: allocation.note ?? ""
@@ -3465,6 +3479,8 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
               <MetricCard label="C(T) 累计可分润净额" value={settlementPreview.cumulativeNetAmount} />
               <MetricCard label="S(T) 累计已分润额" value={settlementPreview.settledBaseAmount} />
               <MetricCard label="P(T) 本次可分润额" value={settlementPreview.distributableAmount} />
+              <MetricCard label="股东支出补偿总额" value={settlementPreview.totalShareholderExpenses} />
+              <MetricCard label="利润分配池" value={settlementPreview.profitPoolAmount} />
               <MetricCard label="本次实发" value={settlementPreview.paidAmount} />
               <MetricCard label="留存余额" value={settlementPreview.carryForwardAmount} />
               <MetricCard label="分润后累计已分润" value={settlementPreview.cumulativeSettledAmount} />
@@ -3578,7 +3594,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
               <p className="text-sm font-semibold">本次分配明细（按实发计算，负值时按应支出显示）</p>
               <p className="mt-1 text-xs text-[var(--muted)]">分配基数：{settlementPreview.allocationBaseAmount}</p>
               <p className="mt-1 text-xs text-[var(--muted)]">
-                实际应收/应付 = 本次应收/应支 - 账号实收。账号实收按绑定账号净额占比折算到本次分配基数。
+                实际应收/应付 = 支出补偿 + 利润分成 - 账号实收。支出优先从总利润池中全额补偿，剩余部分按股东占比分配。
               </p>
               <div className="mt-3 overflow-x-auto rounded-lg border border-[var(--border)]">
                 <table className="min-w-full border-collapse text-sm">
@@ -3587,6 +3603,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
                       <th className="px-3 py-2">分润者</th>
                       <th className="px-3 py-2">账单账号</th>
                       <th className="px-3 py-2">比例</th>
+                      <th className="px-3 py-2">支出补偿</th>
                       <th className="px-3 py-2">本次应收/应支</th>
                       <th className="px-3 py-2">账号实收</th>
                       <th className="px-3 py-2">实际应收/应付</th>
@@ -3604,6 +3621,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
                             {formatParticipantBillAccountLabel(item.participantBillAccount)}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">{item.ratioPercent}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{item.expenseCompensation}</td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             <span className={isNegative ? "text-red-700 font-semibold" : ""}>{item.amount}</span>
                             {isNegative ? (
@@ -3635,7 +3653,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
                     })}
                     {settlementPreview.allocations.length === 0 ? (
                       <tr>
-                        <td className="px-3 py-4 text-center text-[var(--muted)]" colSpan={7}>
+                        <td className="px-3 py-4 text-center text-[var(--muted)]" colSpan={8}>
                           暂无分润者配置，无法计算本次分配明细。
                         </td>
                       </tr>
@@ -3683,6 +3701,8 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
                   <MetricCard label="C(T) 累计可分润净额" value={settlementDetailPreview.cumulativeNetAmount} />
                   <MetricCard label="S(T) 累计已分润额" value={settlementDetailPreview.settledBaseAmount} />
                   <MetricCard label="P(T) 本次可分润额" value={settlementDetailPreview.distributableAmount} />
+                  <MetricCard label="股东支出补偿总额" value={settlementDetailPreview.totalShareholderExpenses} />
+                  <MetricCard label="利润分配池" value={settlementDetailPreview.profitPoolAmount} />
                   <MetricCard label="本次实发" value={settlementDetailPreview.paidAmount} />
                   <MetricCard label="留存余额" value={settlementDetailPreview.carryForwardAmount} />
                   <MetricCard label="分润后累计已分润" value={settlementDetailPreview.cumulativeSettledAmount} />
@@ -3758,6 +3778,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
                                     <th className="px-2 py-1.5">分润者</th>
                                     <th className="px-2 py-1.5">账单账号</th>
                                     <th className="px-2 py-1.5">比例</th>
+                                    <th className="px-2 py-1.5">支出补偿</th>
                                     <th className="px-2 py-1.5">应收/应支</th>
                                     <th className="px-2 py-1.5">账号实收</th>
                                     <th className="px-2 py-1.5">实际应收/应付</th>
@@ -3777,6 +3798,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
                                           {formatParticipantBillAccountLabel(allocation.participantBillAccount)}
                                         </td>
                                         <td className="px-2 py-1.5 whitespace-nowrap">{allocation.ratioPercent}</td>
+                                        <td className="px-2 py-1.5 whitespace-nowrap">{allocation.expenseCompensation}</td>
                                         <td className="px-2 py-1.5 whitespace-nowrap">{allocation.amount}</td>
                                         <td className="px-2 py-1.5 whitespace-nowrap">{allocation.accountHeldAmount}</td>
                                         <td className="px-2 py-1.5 whitespace-nowrap">
@@ -3790,7 +3812,7 @@ function buildTransactionFilterQuery(input: TransactionFilterInput): URLSearchPa
                                   })}
                                   {batch.allocations.length === 0 ? (
                                     <tr>
-                                      <td className="px-2 py-3 text-center text-[var(--muted)]" colSpan={7}>
+                                      <td className="px-2 py-3 text-center text-[var(--muted)]" colSpan={8}>
                                         当前批次无分配记录
                                       </td>
                                     </tr>

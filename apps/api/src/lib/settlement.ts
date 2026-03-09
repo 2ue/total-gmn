@@ -19,6 +19,7 @@ interface SettlementAllocationNumbers {
   participantBillAccount: string | null;
   ratio: number;
   amount: number;
+  expenseCompensation: number;
   accountHeldAmount: number;
   actualTransferAmount: number;
   note: string;
@@ -30,6 +31,7 @@ interface SettlementAllocation {
   participantBillAccount: string | null;
   ratio: string;
   amount: string;
+  expenseCompensation: string;
   accountHeldAmount: string;
   actualTransferAmount: string;
   note: string;
@@ -44,6 +46,8 @@ export interface SettlementPreviewNumbers extends SettlementAmounts {
   previousCarryForwardAmount: number;
   cumulativeNetAmount: number;
   settledBaseAmount: number;
+  totalShareholderExpenses: number;
+  profitPoolAmount: number;
   effectiveBatchId: string | null;
   effectiveBatchNo: string | null;
   allocationBaseAmount: number;
@@ -59,6 +63,8 @@ export interface SettlementPreview {
   previousCarryForwardAmount: string;
   cumulativeNetAmount: string;
   settledBaseAmount: string;
+  totalShareholderExpenses: string;
+  profitPoolAmount: string;
   distributableAmount: string;
   paidAmount: string;
   carryForwardAmount: string;
@@ -280,6 +286,67 @@ async function queryBoundAccountContributionMap(
   return new Map<string, number>(accountRows);
 }
 
+async function queryBoundAccountExpenseMap(
+  settlementTime: Date,
+  strategy: SettlementStrategy,
+  participants: ParticipantRow[],
+  includeClosedDirectionInProfit: boolean,
+  client: SettlementClient
+): Promise<Map<string, number>> {
+  const boundAccounts = [
+    ...new Set(
+      participants
+        .map((item) => item.billAccount)
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+    )
+  ];
+  if (boundAccounts.length === 0) {
+    return new Map<string, number>();
+  }
+
+  const accountRows = await Promise.all(
+    boundAccounts.map(async (account) => {
+      if (strategy === "incremental") {
+        const cumulative = await queryIncrementalNet(
+          settlementTime,
+          account,
+          false,
+          includeClosedDirectionInProfit,
+          client
+        );
+        // For incremental, we need to query expenses separately via profitSummary
+        const summary = await queryProfitSummaryNumbers(
+          { end: settlementTime, billAccount: account },
+          client
+        );
+        const expenseTotal = round2(
+          summary.mainExpense +
+            summary.trafficCost +
+            summary.platformCommission +
+            summary.businessRefundExpense +
+            (includeClosedDirectionInProfit ? summary.mainClosedExpense : 0)
+        );
+        return [account, expenseTotal] as const;
+      }
+
+      const summary = await queryProfitSummaryNumbers(
+        { end: settlementTime, billAccount: account },
+        client
+      );
+      const expenseTotal = round2(
+        summary.mainExpense +
+          summary.trafficCost +
+          summary.platformCommission +
+          summary.businessRefundExpense +
+          (includeClosedDirectionInProfit ? summary.mainClosedExpense : 0)
+      );
+      return [account, expenseTotal] as const;
+    })
+  );
+
+  return new Map<string, number>(accountRows);
+}
+
 function buildAccountHeldMap(
   accountContributionMap: Map<string, number>,
   allocationBaseAmount: number
@@ -347,6 +414,8 @@ async function buildSettlementAllocations(
   participants: ParticipantRow[],
   cumulativeAllocationBaseAmount: number,
   batchAllocationBaseAmount: number,
+  profitPoolAmount: number,
+  accountExpenseMap: Map<string, number>,
   settlementTime: Date,
   strategy: SettlementStrategy,
   billAccount: string,
@@ -357,9 +426,9 @@ async function buildSettlementAllocations(
     return [];
   }
 
-  const batchShouldAmounts = buildAmountByRatio(
+  const profitShareAmounts = buildAmountByRatio(
     participants.map((participant) => participant.ratio),
-    batchAllocationBaseAmount
+    profitPoolAmount
   );
   const accountContributionMap = await queryBoundAccountContributionMap(
     settlementTime,
@@ -374,8 +443,10 @@ async function buildSettlementAllocations(
   );
 
   const allocations = participants.map((participant, index) => {
-    const amount = batchShouldAmounts[index] ?? 0;
     const participantBillAccount = participant.billAccount?.trim() ?? "";
+    const expenseCompensation = accountExpenseMap.get(participantBillAccount) ?? 0;
+    const profitShare = profitShareAmounts[index] ?? 0;
+    const amount = round2(expenseCompensation + profitShare);
     const accountHeldAmount = cumulativeHeldTargetsByAccount.get(participantBillAccount) ?? 0;
     const actualTransferAmount = round2(amount - accountHeldAmount);
 
@@ -385,6 +456,7 @@ async function buildSettlementAllocations(
       participantBillAccount: participant.billAccount,
       ratio: participant.ratio,
       amount,
+      expenseCompensation,
       accountHeldAmount,
       actualTransferAmount,
       note: participant.note
@@ -457,6 +529,8 @@ function formatPreview(input: SettlementPreviewNumbers): SettlementPreview {
     previousCarryForwardAmount: formatAmount(input.previousCarryForwardAmount),
     cumulativeNetAmount: formatAmount(input.cumulativeNetAmount),
     settledBaseAmount: formatAmount(input.settledBaseAmount),
+    totalShareholderExpenses: formatAmount(input.totalShareholderExpenses),
+    profitPoolAmount: formatAmount(input.profitPoolAmount),
     distributableAmount: formatAmount(input.distributableAmount),
     paidAmount: formatAmount(input.paidAmount),
     carryForwardAmount: formatAmount(input.carryForwardAmount),
@@ -470,6 +544,7 @@ function formatPreview(input: SettlementPreviewNumbers): SettlementPreview {
       participantBillAccount: item.participantBillAccount,
       ratio: item.ratio.toFixed(6),
       amount: formatAmount(item.amount),
+      expenseCompensation: formatAmount(item.expenseCompensation),
       accountHeldAmount: formatAmount(item.accountHeldAmount),
       actualTransferAmount: formatAmount(item.actualTransferAmount),
       note: item.note
@@ -810,11 +885,53 @@ async function buildSettlementPreview(
     const previousCarryForwardAmount = round2(toNumber(effectiveBatch?.carryForwardAmount ?? DECIMAL_ZERO));
     const cumulativeNetAmount = cumulative.periodNetAmount;
     const periodNetAmount = period.periodNetAmount;
-    const currentPeriodPaidAmount = round2(periodNetAmount * (1 - safeCarryRatio));
-    const carryForwardAmount = round2(periodNetAmount * safeCarryRatio);
-    const distributableAmount = round2(previousCarryForwardAmount + currentPeriodPaidAmount);
-    const paidAmount = distributableAmount;
+
+    // Expense-first compensation: query shareholder expenses
+    const participants = await listParticipantRows(client);
+    const accountExpenseMap = await queryBoundAccountExpenseMap(
+      settlementTime, strategy, participants, includeClosedDirectionInProfit, client
+    );
+    const totalShareholderExpenses = round2(
+      [...accountExpenseMap.values()].reduce((sum, val) => sum + val, 0)
+    );
+
+    const totalAvailable = round2(previousCarryForwardAmount + periodNetAmount);
+    const pureProfit = round2(totalAvailable - totalShareholderExpenses);
+
+    let carryForwardAmount: number;
+    let profitPoolAmount: number;
+    let paidAmount: number;
+
+    if (pureProfit > 0) {
+      carryForwardAmount = round2(pureProfit * safeCarryRatio);
+      profitPoolAmount = round2(pureProfit - carryForwardAmount);
+      paidAmount = round2(totalShareholderExpenses + profitPoolAmount);
+    } else if (totalAvailable > 0) {
+      carryForwardAmount = 0;
+      profitPoolAmount = 0;
+      paidAmount = totalAvailable;
+    } else {
+      carryForwardAmount = round2(Math.abs(totalAvailable));
+      profitPoolAmount = 0;
+      paidAmount = 0;
+    }
+
+    const distributableAmount = totalAvailable;
     const cumulativeSettledAmount = round2(settledBaseAmount + paidAmount);
+
+    const allocationBaseAmount = paidAmount;
+    const allocations = await buildSettlementAllocations(
+      participants,
+      cumulativeSettledAmount,
+      allocationBaseAmount,
+      profitPoolAmount,
+      accountExpenseMap,
+      settlementTime,
+      strategy,
+      billAccount,
+      includeClosedDirectionInProfit,
+      client
+    );
 
     corePreview = {
       strategy,
@@ -825,6 +942,8 @@ async function buildSettlementPreview(
       previousCarryForwardAmount,
       cumulativeNetAmount,
       settledBaseAmount,
+      totalShareholderExpenses,
+      profitPoolAmount,
       distributableAmount,
       paidAmount,
       carryForwardAmount,
@@ -833,6 +952,15 @@ async function buildSettlementPreview(
       effectiveBatchNo: effectiveBatch?.batchNo ?? null
     };
     incrementalCandidateIds = period.candidateIds;
+
+    return {
+      preview: {
+        ...corePreview,
+        allocationBaseAmount,
+        allocations
+      },
+      incrementalCandidateIds
+    };
   } else {
     const [summary, effectiveBatch] = await Promise.all([
       queryProfitSummaryNumbers(
@@ -864,11 +992,53 @@ async function buildSettlementPreview(
     const settledBaseAmount = round2(toNumber(effectiveBatch?.cumulativeSettledAmount ?? DECIMAL_ZERO));
     const previousCarryForwardAmount = round2(toNumber(effectiveBatch?.carryForwardAmount ?? DECIMAL_ZERO));
     const periodNetAmount = round2(cumulativeNetAmount - previousCumulativeNetAmount);
-    const currentPeriodPaidAmount = round2(periodNetAmount * (1 - safeCarryRatio));
-    const carryForwardAmount = round2(periodNetAmount * safeCarryRatio);
-    const distributableAmount = round2(previousCarryForwardAmount + currentPeriodPaidAmount);
-    const paidAmount = distributableAmount;
+
+    // Expense-first compensation: query shareholder expenses
+    const participants = await listParticipantRows(client);
+    const accountExpenseMap = await queryBoundAccountExpenseMap(
+      settlementTime, strategy, participants, includeClosedDirectionInProfit, client
+    );
+    const totalShareholderExpenses = round2(
+      [...accountExpenseMap.values()].reduce((sum, val) => sum + val, 0)
+    );
+
+    const totalAvailable = round2(previousCarryForwardAmount + periodNetAmount);
+    const pureProfit = round2(totalAvailable - totalShareholderExpenses);
+
+    let carryForwardAmount: number;
+    let profitPoolAmount: number;
+    let paidAmount: number;
+
+    if (pureProfit > 0) {
+      carryForwardAmount = round2(pureProfit * safeCarryRatio);
+      profitPoolAmount = round2(pureProfit - carryForwardAmount);
+      paidAmount = round2(totalShareholderExpenses + profitPoolAmount);
+    } else if (totalAvailable > 0) {
+      carryForwardAmount = 0;
+      profitPoolAmount = 0;
+      paidAmount = totalAvailable;
+    } else {
+      carryForwardAmount = round2(Math.abs(totalAvailable));
+      profitPoolAmount = 0;
+      paidAmount = 0;
+    }
+
+    const distributableAmount = totalAvailable;
     const cumulativeSettledAmount = round2(settledBaseAmount + paidAmount);
+
+    const allocationBaseAmount = paidAmount;
+    const allocations = await buildSettlementAllocations(
+      participants,
+      cumulativeSettledAmount,
+      allocationBaseAmount,
+      profitPoolAmount,
+      accountExpenseMap,
+      settlementTime,
+      strategy,
+      billAccount,
+      includeClosedDirectionInProfit,
+      client
+    );
 
     corePreview = {
       strategy,
@@ -879,6 +1049,8 @@ async function buildSettlementPreview(
       previousCarryForwardAmount,
       cumulativeNetAmount,
       settledBaseAmount,
+      totalShareholderExpenses,
+      profitPoolAmount,
       distributableAmount,
       paidAmount,
       carryForwardAmount,
@@ -886,29 +1058,16 @@ async function buildSettlementPreview(
       effectiveBatchId: effectiveBatch?.id ?? null,
       effectiveBatchNo: effectiveBatch?.batchNo ?? null
     };
+
+    return {
+      preview: {
+        ...corePreview,
+        allocationBaseAmount,
+        allocations
+      },
+      incrementalCandidateIds
+    };
   }
-
-  const participants = await listParticipantRows(client);
-  const allocationBaseAmount = corePreview.paidAmount;
-  const allocations = await buildSettlementAllocations(
-    participants,
-    corePreview.cumulativeSettledAmount,
-    allocationBaseAmount,
-    settlementTime,
-    strategy,
-    billAccount,
-    includeClosedDirectionInProfit,
-    client
-  );
-
-  return {
-    preview: {
-      ...corePreview,
-      allocationBaseAmount,
-      allocations
-    },
-    incrementalCandidateIds
-  };
 }
 
 function chunkIds(ids: string[], chunkSize: number): string[][] {
@@ -969,6 +1128,8 @@ export async function createSettlementBatch(input: {
   previousCarryForwardAmount: string;
   cumulativeNetAmount: string;
   settledBaseAmount: string;
+  totalShareholderExpenses: string;
+  profitPoolAmount: string;
   distributableAmount: string;
   paidAmount: string;
   carryForwardAmount: string;
@@ -1014,6 +1175,8 @@ export async function createSettlementBatch(input: {
         distributableAmount: toDecimal(computed.preview.distributableAmount),
         paidAmount: toDecimal(computed.preview.paidAmount),
         carryForwardAmount: toDecimal(computed.preview.carryForwardAmount),
+        totalShareholderExpenses: toDecimal(computed.preview.totalShareholderExpenses),
+        profitPoolAmount: toDecimal(computed.preview.profitPoolAmount),
         cumulativeSettledAmount: toDecimal(computed.preview.cumulativeSettledAmount),
         note: input.note?.trim() ?? "",
         isEffective: true
@@ -1029,6 +1192,7 @@ export async function createSettlementBatch(input: {
           participantBillAccount: allocation.participantBillAccount,
           ratio: toDecimalByScale(allocation.ratio, 6),
           amount: toDecimal(allocation.amount),
+          expenseCompensation: toDecimal(allocation.expenseCompensation),
           accountHeldAmount: toDecimal(allocation.accountHeldAmount),
           actualTransferAmount: toDecimal(allocation.actualTransferAmount),
           note: allocation.note
@@ -1066,6 +1230,8 @@ export async function createSettlementBatch(input: {
     previousCarryForwardAmount: formatAmount(toNumber(created.previousCarryForwardAmount)),
     cumulativeNetAmount: formatAmount(toNumber(created.cumulativeNetAmount)),
     settledBaseAmount: formatAmount(toNumber(created.settledBaseAmount)),
+    totalShareholderExpenses: formatAmount(toNumber(created.totalShareholderExpenses)),
+    profitPoolAmount: formatAmount(toNumber(created.profitPoolAmount)),
     distributableAmount: formatAmount(toNumber(created.distributableAmount)),
     paidAmount: formatAmount(toNumber(created.paidAmount)),
     carryForwardAmount: formatAmount(toNumber(created.carryForwardAmount)),
@@ -1088,6 +1254,8 @@ export async function listSettlementBatches(strategy?: SettlementStrategy, billA
     previousCarryForwardAmount: string;
     cumulativeNetAmount: string;
     settledBaseAmount: string;
+    totalShareholderExpenses: string;
+    profitPoolAmount: string;
     distributableAmount: string;
     paidAmount: string;
     carryForwardAmount: string;
@@ -1138,6 +1306,8 @@ export async function listSettlementBatches(strategy?: SettlementStrategy, billA
     previousCarryForwardAmount: formatAmount(toNumber(batch.previousCarryForwardAmount)),
     cumulativeNetAmount: formatAmount(toNumber(batch.cumulativeNetAmount)),
     settledBaseAmount: formatAmount(toNumber(batch.settledBaseAmount)),
+    totalShareholderExpenses: formatAmount(toNumber(batch.totalShareholderExpenses)),
+    profitPoolAmount: formatAmount(toNumber(batch.profitPoolAmount)),
     distributableAmount: formatAmount(toNumber(batch.distributableAmount)),
     paidAmount: formatAmount(toNumber(batch.paidAmount)),
     carryForwardAmount: formatAmount(toNumber(batch.carryForwardAmount)),
@@ -1151,6 +1321,7 @@ export async function listSettlementBatches(strategy?: SettlementStrategy, billA
       participantBillAccount: item.participantBillAccount,
       ratio: Number(item.ratio.toString()).toFixed(6),
       amount: formatAmount(toNumber(item.amount)),
+      expenseCompensation: formatAmount(toNumber(item.expenseCompensation)),
       accountHeldAmount: formatAmount(toNumber(item.accountHeldAmount)),
       actualTransferAmount: formatAmount(toNumber(item.actualTransferAmount)),
       note: item.note

@@ -60,6 +60,8 @@ model SettlementBatch {
   distributableAmount    Decimal
   paidAmount             Decimal
   carryForwardAmount     Decimal
+  totalShareholderExpenses Decimal @default(0)
+  profitPoolAmount       Decimal  @default(0)
   cumulativeSettledAmount Decimal
   note                   String   @default("")
   isEffective            Boolean  @default(false)
@@ -97,6 +99,7 @@ model SettlementAllocation {
   participantBillAccount String?
   ratio                 Decimal
   amount                Decimal
+  expenseCompensation   Decimal           @default(0)
   accountHeldAmount     Decimal           @default(0)
   actualTransferAmount  Decimal           @default(0)
   note                  String            @default("")
